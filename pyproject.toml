@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pii-shield"
+version = "0.1.0"
+description = "A localhost PII shielding proxy for text-only Chat Completions."
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "argon2-cffi>=25.1,<26",
+    "cryptography>=46",
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "presidio-analyzer>=2.2,<3",
+    "pydantic>=2.10,<3",
+    "pyyaml>=6,<7",
+    "spacy>=3.8,<4",
+    "uvicorn>=0.34,<1",
+]
+
+[project.scripts]
+pii-shield = "shield.__main__:main"
+
+[dependency-groups]
+dev = [
+    "faker>=37",
+    "hypothesis>=6,<7",
+    "pytest>=8.3,<10",
+    "pytest-asyncio>=1,<2",
+    "ruff>=0.14,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["shield"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

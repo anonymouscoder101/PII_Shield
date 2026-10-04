@@ -1,0 +1,41 @@
+# Python environments, caches, and build artifacts
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+shield.yaml
+shield.local.yaml
+
+# Vault files, SQLite sidecars, and local logs
+.shield/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.log
+logs/
+
+# Generated evaluation data and captured provider exchanges
+/eval/results/
+/eval/datasets/generated/
+/demo/captures/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
