@@ -18,6 +18,7 @@ dist/
 !.env.example
 shield.yaml
 shield.local.yaml
+PII_Shielding_Proxy_Design_Document_v0.1.docx
 
 # Vault files, SQLite sidecars, and local logs
 .shield/
