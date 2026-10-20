@@ -7,10 +7,9 @@ and [the accepted design decisions](docs/decisions/001-session-storage-and-buffe
 
 ## Current status
 
-Phase 1 task #1 is implemented: an installable Python package, dependency manifest
-and lockfile, project layout, local server scaffold, ignore rules, and example
-configuration. The configuration loader, API contracts, fake upstream, detection,
-vault, restoration, and proxy endpoints are future tasks. The scaffold serves
+Phase 1 tasks #1–2 are implemented: the package scaffold and shared typed domain
+contracts. The configuration loader, HTTP request/response contracts, fake upstream,
+detection, vault, restoration, and proxy endpoints are future tasks. The scaffold serves
 FastAPI's documentation and OpenAPI schema only; it makes no upstream calls and
 provides no PII protection yet.
 
@@ -94,6 +93,32 @@ The design's `config.py`, `session.py`, `vault.py`, `pseudonym.py`, `upstream.py
 `rehydrate.py`, detector modules, and evaluation scripts will be added as their
 implementation tasks are completed.
 
+## Shared contracts
+
+[`shield/contracts.py`](shield/contracts.py) defines validated Pydantic models for
+detected spans, in-memory token mappings, session metadata, protection reports,
+and API error envelopes. Models reject unknown fields and implicit coercion;
+Python callers use the supplied enums for entity types, stages, session kinds,
+and error codes. HTTP payload models and error/status handling belong to task #4.
+
+- `DetectedSpan` uses half-open Python string indices (`text[start:end]`), including
+  Unicode code points. Call `span.validate_for_text(text)` to check source bounds.
+- `TokenMapping` retains the full 32-byte entity digest and first observed spelling.
+  The original value is masked during representation and serialization; restoration
+  and encryption code must explicitly access `original_value.get_secret_value()`.
+  The digest is excluded from serialization. This model is not a vault storage row.
+- `SessionRecord` contains metadata only. Persistent records require a timezone-aware
+  expiry after creation; ephemeral records have no expiry timestamp and must be
+  released by the request lifecycle. No keys are included in this record.
+- `ProtectionReport` counts protected occurrences and intentional allowlisted
+  disclosures separately by entity type, with derived totals and an unknown-token
+  occurrence count. Counts do not establish that undetected PII was removed.
+- `APIError` wraps a stable error code and a message. Callers must supply static,
+  privacy-safe messages; arbitrary exception and provider text is not sanitized.
+
+Validation exception text hides input values. Structured validation errors can
+still contain inputs and must not be logged or returned directly to clients.
+
 ## Development checks
 
 ```sh
@@ -102,8 +127,9 @@ uv run --locked ruff format --check .
 uv build
 ```
 
-No feature tests exist yet. Once added under `tests/`, run
-`uv run --locked pytest`. Use synthetic fixtures and the fake upstream before any
+Run the contract tests with `uv run --locked pytest`. They cover Unicode offsets,
+validation boundaries, secret representation, session lifetimes, report accounting,
+and error envelopes. Use synthetic fixtures and the fake upstream before any
 provider smoke test. Future buffered SSE will wait for the complete upstream
 answer, and detector misses must be measured rather than treated as a guarantee
 that all PII is removed.

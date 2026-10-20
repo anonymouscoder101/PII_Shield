@@ -1,6 +1,9 @@
 # Tests
 
-Reserved for unit, integration, and property tests as features are implemented.
-Use a fake upstream and synthetic values; the detailed verification strategy is in
-`IMPLEMENTATION_PLAN.md`. No feature tests exist in this task #1 skeleton yet.
-Run `uv run --locked pytest` once tests have been added.
+`test_contracts.py` checks shared contract boundaries: Python Unicode offsets,
+full digest length, masked mapping values, session lifetimes, separate allowlist
+accounting, and nested error validation.
+
+Run `uv run --locked pytest`. Future integration tests will use a fake upstream;
+all fixtures must use synthetic values. The detailed verification strategy is in
+`IMPLEMENTATION_PLAN.md`.
