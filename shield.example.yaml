@@ -1,10 +1,9 @@
-# Proposed configuration contract. The scaffold does not load this file yet.
-# Copy to shield.yaml once the validated loader (Phase 1 task #3) is implemented.
+# Copy to shield.yaml for automatic loading, or use --config PATH.
 # Use synthetic inputs and the local fake upstream during foundation development.
 upstream:
   base_url: http://127.0.0.1:8001/v1
   api_key_env: UPSTREAM_API_KEY  # The key value belongs in the environment only.
-  timeout_s: 60
+  timeout_s: 60  # Positive finite HTTP timeout, in seconds; applied by future client.
 
 detection:
   mode: balanced  # fast=0.6 | balanced=0.5 | paranoid=0.3
@@ -15,7 +14,7 @@ detection:
   allowlist: []  # Intentional disclosures; counted separately in future reports.
 
 vault:
-  path: ~/.shield/vault.db
+  path: ~/.shield/vault.db  # Relative paths resolve beside this configuration file.
   session_ttl_hours: 24  # Only explicitly created persistent sessions.
   argon2:
     memory_kib: 65536
@@ -26,7 +25,7 @@ sessions:
   default: ephemeral  # Request-local memory; no vault unlock required.
 
 server:
-  host: 127.0.0.1
+  host: 127.0.0.1  # Only this binding is supported.
   port: 8000
 
 # Persistent vault passphrases will be collected with a non-echoing prompt.

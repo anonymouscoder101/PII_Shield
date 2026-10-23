@@ -7,9 +7,10 @@ and [the accepted design decisions](docs/decisions/001-session-storage-and-buffe
 
 ## Current status
 
-Phase 1 tasks #1–2 are implemented: the package scaffold and shared typed domain
-contracts. The configuration loader, HTTP request/response contracts, fake upstream,
-detection, vault, restoration, and proxy endpoints are future tasks. The scaffold serves
+Phase 1 tasks #1–3 are implemented: the package scaffold, shared typed domain
+contracts, and validated YAML configuration with CLI startup integration.
+HTTP request/response contracts, fake upstream, detection, vault, restoration,
+and proxy endpoints are future tasks. The scaffold serves
 FastAPI's documentation and OpenAPI schema only; it makes no upstream calls and
 provides no PII protection yet.
 
@@ -62,10 +63,42 @@ Stop with Ctrl-C.
 
 ## Configuration example
 
-[`shield.example.yaml`](shield.example.yaml) records the proposed configuration.
-Its local upstream URL reserves port 8001 for the future fake upstream. The
-scaffold does not read YAML or environment credentials yet; startup uses the
-loopback address and port above. Implement validated loading in Phase 1 task #3.
+The CLI loads `shield.yaml` from the working directory when present; otherwise it
+uses built-in defaults matching [`shield.example.yaml`](shield.example.yaml).
+An explicit file must exist. For example:
+
+```sh
+cp shield.example.yaml shield.yaml
+uv run --locked pii-shield
+# Or select another configuration file:
+uv run --locked pii-shield --config path/to/settings.yaml
+```
+
+[`shield/config.py`](shield/config.py) validates every section before server startup.
+Unknown fields, duplicate YAML keys, unsupported modes, invalid URLs, nonpositive
+timeouts/TTL, and invalid ports fail with field-specific errors that omit input
+values. Empty documents are rejected; use `{}` to select all defaults. The server
+host must be `127.0.0.1`; `server.port` may be changed. Upstream URLs must use HTTP
+or HTTPS without credentials, queries, fragments, or whitespace. The default URL
+reserves `127.0.0.1:8001/v1` for the future fake upstream.
+
+`detection.threshold` is optional: `config.detection.effective_threshold` resolves
+to fast=0.6, balanced=0.5, or paranoid=0.3 unless an explicit threshold in [0, 1]
+overrides it, including zero. Allowlist terms preserve their exact spelling and
+must be nonblank strings. Stage 2 model, timeout, and failure-policy settings are
+validated but no reviewer is loaded yet.
+
+Vault paths expand `~`; relative paths resolve beside the YAML file. The loader
+creates no files or directories and does not open or unlock a vault. Session TTL
+is a positive finite number of hours, defaulting to 24. Default sessions must be
+ephemeral; reusable sessions will require explicit creation. Argon2 parameters
+default to 65536 KiB, 3 iterations, and parallelism 4. Loading requires positive
+iteration/parallelism values and memory of at least eight times parallelism.
+
+The CLI passes the settings to `create_app(config)`, available as `app.state.config`.
+Importing `shield.app:app` directly uses built-in settings without reading YAML;
+use the CLI to load a file. Settings for detection, HTTP timeouts, and persistence
+will be consumed by their implementations in later tasks.
 
 Keep provider credentials in the environment variable named by `api_key_env`.
 Persistent sessions will obtain a passphrase through a non-echoing prompt, while
@@ -89,7 +122,7 @@ uv.lock                 Reproducible dependency resolution
 .python-version         Exact interpreter pin
 ```
 
-The design's `config.py`, `session.py`, `vault.py`, `pseudonym.py`, `upstream.py`,
+The design's `session.py`, `vault.py`, `pseudonym.py`, `upstream.py`,
 `rehydrate.py`, detector modules, and evaluation scripts will be added as their
 implementation tasks are completed.
 
@@ -127,9 +160,9 @@ uv run --locked ruff format --check .
 uv build
 ```
 
-Run the contract tests with `uv run --locked pytest`. They cover Unicode offsets,
-validation boundaries, secret representation, session lifetimes, report accounting,
-and error envelopes. Use synthetic fixtures and the fake upstream before any
+Run the tests with `uv run --locked pytest`. They cover domain contracts,
+configuration validation, threshold precedence, safe startup failures, and CLI
+settings propagation. Use synthetic fixtures and the fake upstream before any
 provider smoke test. Future buffered SSE will wait for the complete upstream
 answer, and detector misses must be measured rather than treated as a guarantee
 that all PII is removed.
