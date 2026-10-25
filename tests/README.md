@@ -14,6 +14,10 @@ in-process HTTPX transport. `test_credentials.py` checks environment-only provid
 keys, masked runtime state, opt-in passphrase prompting, and failure before any
 echoed fallback input or server startup.
 
-Run `uv run --locked pytest`. Future integration tests will use a fake upstream;
-all fixtures must use synthetic values. The detailed verification strategy is in
+`test_fake_upstream.py` checks byte-for-byte request capture, configurable
+token-bearing and refusal-only responses, rejected requests, concurrency and app
+isolation, localhost startup, and synthetic fixture coordinates/expected payloads.
+
+Run `uv run --locked pytest`. All fixtures must use synthetic values. The
+detailed verification strategy is in
 `IMPLEMENTATION_PLAN.md`.

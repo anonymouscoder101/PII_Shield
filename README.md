@@ -7,11 +7,12 @@ and [the accepted design decisions](docs/decisions/001-session-storage-and-buffe
 
 ## Current status
 
-Phase 1 tasks #1–4 are implemented: the package scaffold, shared typed domain
+Phase 1 tasks #1–5 are implemented: the package scaffold, shared typed domain
 contracts, validated configuration, strict Chat Completions schemas, safe errors,
-and runtime credential loading. `/v1/chat/completions` validates requests and
-returns 503 until the protection pipeline exists. Fake upstream, detection, vault,
-restoration, and working proxy endpoints are future tasks. The scaffold makes no
+runtime credential loading, and a separate fake upstream with synthetic fixtures.
+The proxy's `/v1/chat/completions` validates requests and returns 503 until the
+protection pipeline exists. Detection, vault, restoration, and working proxy
+endpoints are future tasks. The proxy scaffold makes no
 upstream calls and provides no PII protection yet.
 
 ## Setup with uv
@@ -61,6 +62,37 @@ The server binds to `127.0.0.1:8000`. Open `http://127.0.0.1:8000/docs` to inspe
 the supported request schema. `/v1/chat/completions` rejects unsupported payloads
 with 400 and returns 503 for valid requests. `/shield/*` is not available yet.
 Stop with Ctrl-C.
+
+## Run the fake upstream
+
+```sh
+uv run --locked python -m shield.fake_upstream
+```
+
+This separate app binds to `127.0.0.1:8001`, matching the example upstream URL.
+It accepts JSON at `/v1/chat/completions`, captures exact request body bytes in
+memory, and returns a deterministic response containing `[PERSON_7K2Q]` and
+`[EMAIL_2M4R]`. It supports multiple choices via `n`; its usage counts are synthetic
+zeros. It rejects upstream `stream: true` so later tests can catch a proxy that
+forgets to request buffered JSON. Request bodies and authorization headers are
+not logged; headers are not captured.
+
+Use synthetic inputs only. For example, in another terminal:
+
+```sh
+curl http://127.0.0.1:8001/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"synthetic-model","messages":[{"role":"user","content":"Contact [PERSON_7K2Q] at [EMAIL_2M4R]."}],"stream":false}'
+```
+
+For tests, `create_fake_upstream(response_factory=...)` accepts a synchronous
+function taking `ChatCompletionRequest` and returning `ChatCompletionResponse`.
+Inspect `fake.state.captures`, a list of records whose `.body` is the original
+serialized JSON, using HTTPX `ASGITransport` to avoid network access. Each app has
+its own capture list, including malformed/rejected chat requests. Clear the list
+with `.clear()` between cases. Captures are not exported or exposed over HTTP.
+See [the fixture guide](eval/datasets/README.md) and
+[`test_fake_upstream.py`](tests/test_fake_upstream.py) for controlled response examples.
 
 ## Configuration example
 

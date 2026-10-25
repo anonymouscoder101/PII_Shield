@@ -1,0 +1,273 @@
+[
+  {
+    "id": "repeated-person-email",
+    "synthetic": true,
+    "request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Use synthetic contacts only."
+        },
+        {
+          "role": "developer",
+          "content": "Draft a brief reply."
+        },
+        {
+          "role": "user",
+          "content": "Email Casey Example at casey@example.test. Casey Example will reply."
+        },
+        {
+          "role": "assistant",
+          "content": "Casey Example uses casey@example.test."
+        }
+      ],
+      "stream": false
+    },
+    "sanitized_request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Use synthetic contacts only."
+        },
+        {
+          "role": "developer",
+          "content": "Draft a brief reply."
+        },
+        {
+          "role": "user",
+          "content": "Email [PERSON_7K2Q] at [EMAIL_2M4R]. [PERSON_7K2Q] will reply."
+        },
+        {
+          "role": "assistant",
+          "content": "[PERSON_7K2Q] uses [EMAIL_2M4R]."
+        }
+      ],
+      "stream": false
+    },
+    "entities": [
+      {
+        "message_index": 2,
+        "start": 6,
+        "end": 19,
+        "entity_type": "PERSON",
+        "value": "Casey Example",
+        "token": "[PERSON_7K2Q]"
+      },
+      {
+        "message_index": 2,
+        "start": 23,
+        "end": 41,
+        "entity_type": "EMAIL_ADDRESS",
+        "value": "casey@example.test",
+        "token": "[EMAIL_2M4R]"
+      },
+      {
+        "message_index": 2,
+        "start": 43,
+        "end": 56,
+        "entity_type": "PERSON",
+        "value": "Casey Example",
+        "token": "[PERSON_7K2Q]"
+      },
+      {
+        "message_index": 3,
+        "start": 0,
+        "end": 13,
+        "entity_type": "PERSON",
+        "value": "Casey Example",
+        "token": "[PERSON_7K2Q]"
+      },
+      {
+        "message_index": 3,
+        "start": 19,
+        "end": 37,
+        "entity_type": "EMAIL_ADDRESS",
+        "value": "casey@example.test",
+        "token": "[EMAIL_2M4R]"
+      }
+    ],
+    "response": {
+      "id": "chatcmpl-repeated-person-email",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "synthetic-model",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "[PERSON_7K2Q] can be reached at [EMAIL_2M4R]."
+          },
+          "finish_reason": "stop"
+        }
+      ]
+    }
+  },
+  {
+    "id": "unicode-offsets",
+    "synthetic": true,
+    "request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "🙂 Ask 李 Example and José Example about the draft."
+        }
+      ],
+      "stream": false
+    },
+    "sanitized_request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "🙂 Ask [PERSON_U2W4] and [PERSON_N6R8] about the draft."
+        }
+      ],
+      "stream": false
+    },
+    "entities": [
+      {
+        "message_index": 0,
+        "start": 6,
+        "end": 15,
+        "entity_type": "PERSON",
+        "value": "李 Example",
+        "token": "[PERSON_U2W4]"
+      },
+      {
+        "message_index": 0,
+        "start": 20,
+        "end": 32,
+        "entity_type": "PERSON",
+        "value": "José Example",
+        "token": "[PERSON_N6R8]"
+      }
+    ],
+    "response": {
+      "id": "chatcmpl-unicode-offsets",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "synthetic-model",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "[PERSON_U2W4] and [PERSON_N6R8] will review the draft."
+          },
+          "finish_reason": "stop"
+        }
+      ]
+    }
+  },
+  {
+    "id": "synthetic-identifiers",
+    "synthetic": true,
+    "request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Synthetic employee DEMO-0042 uses 202-555-0147 and secret sk_test_SYNTHETIC_ONLY_42."
+        }
+      ],
+      "stream": false
+    },
+    "sanitized_request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Synthetic employee [EMPLOYEE_4T6V] uses [PHONE_3X5Z] and secret [APIKEY_8B2D]."
+        }
+      ],
+      "stream": false
+    },
+    "entities": [
+      {
+        "message_index": 0,
+        "start": 19,
+        "end": 28,
+        "entity_type": "EMPLOYEE_ID",
+        "value": "DEMO-0042",
+        "token": "[EMPLOYEE_4T6V]"
+      },
+      {
+        "message_index": 0,
+        "start": 34,
+        "end": 46,
+        "entity_type": "PHONE_NUMBER",
+        "value": "202-555-0147",
+        "token": "[PHONE_3X5Z]"
+      },
+      {
+        "message_index": 0,
+        "start": 58,
+        "end": 83,
+        "entity_type": "API_KEY",
+        "value": "sk_test_SYNTHETIC_ONLY_42",
+        "token": "[APIKEY_8B2D]"
+      }
+    ],
+    "response": {
+      "id": "chatcmpl-synthetic-identifiers",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "synthetic-model",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "[EMPLOYEE_4T6V] uses [PHONE_3X5Z] and [APIKEY_8B2D]."
+          },
+          "finish_reason": "stop"
+        }
+      ]
+    }
+  },
+  {
+    "id": "clean-negative",
+    "synthetic": true,
+    "request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Summarize: The synthetic project is on schedule."
+        }
+      ],
+      "stream": false
+    },
+    "sanitized_request": {
+      "model": "synthetic-model",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Summarize: The synthetic project is on schedule."
+        }
+      ],
+      "stream": false
+    },
+    "entities": [],
+    "response": {
+      "id": "chatcmpl-clean-negative",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "synthetic-model",
+      "choices": [
+        {
+          "index": 0,
+          "message": {
+            "role": "assistant",
+            "content": "The synthetic project is on schedule."
+          },
+          "finish_reason": "stop"
+        }
+      ]
+    }
+  }
+]
