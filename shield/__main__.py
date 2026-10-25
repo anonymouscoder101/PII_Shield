@@ -7,6 +7,7 @@ import uvicorn
 
 from shield.app import create_app
 from shield.config import ConfigurationError, load_config
+from shield.credentials import CredentialError, load_credentials
 
 
 def main() -> None:
@@ -18,9 +19,16 @@ def main() -> None:
     args = parser.parse_args()
     try:
         config = load_config(args.config)
-    except ConfigurationError as exc:
+        credentials = load_credentials(config)
+    except (ConfigurationError, CredentialError) as exc:
         parser.error(str(exc))
-    uvicorn.run(create_app(config), host=config.server.host, port=config.server.port)
+    except KeyboardInterrupt:
+        parser.exit(130, "Startup cancelled.\n")
+    uvicorn.run(
+        create_app(config, credentials),
+        host=config.server.host,
+        port=config.server.port,
+    )
 
 
 if __name__ == "__main__":

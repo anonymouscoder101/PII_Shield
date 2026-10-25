@@ -182,6 +182,10 @@ class ErrorCode(StrEnum):
     UPSTREAM_TIMEOUT = "upstream_timeout"
     UPSTREAM_ERROR = "upstream_error"
     INTERNAL_ERROR = "internal_error"
+    NOT_FOUND = "not_found"
+    METHOD_NOT_ALLOWED = "method_not_allowed"
+    UNSUPPORTED_MEDIA_TYPE = "unsupported_media_type"
+    PROTECTION_UNAVAILABLE = "protection_unavailable"
 
 
 class APIErrorDetail(Contract):

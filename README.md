@@ -7,12 +7,12 @@ and [the accepted design decisions](docs/decisions/001-session-storage-and-buffe
 
 ## Current status
 
-Phase 1 tasks #1–3 are implemented: the package scaffold, shared typed domain
-contracts, and validated YAML configuration with CLI startup integration.
-HTTP request/response contracts, fake upstream, detection, vault, restoration,
-and proxy endpoints are future tasks. The scaffold serves
-FastAPI's documentation and OpenAPI schema only; it makes no upstream calls and
-provides no PII protection yet.
+Phase 1 tasks #1–4 are implemented: the package scaffold, shared typed domain
+contracts, validated configuration, strict Chat Completions schemas, safe errors,
+and runtime credential loading. `/v1/chat/completions` validates requests and
+returns 503 until the protection pipeline exists. Fake upstream, detection, vault,
+restoration, and working proxy endpoints are future tasks. The scaffold makes no
+upstream calls and provides no PII protection yet.
 
 ## Setup with uv
 
@@ -58,7 +58,8 @@ uv run --locked python -m shield
 ```
 
 The server binds to `127.0.0.1:8000`. Open `http://127.0.0.1:8000/docs` to inspect
-the empty API scaffold; `/v1/chat/completions` and `/shield/*` are not available yet.
+the supported request schema. `/v1/chat/completions` rejects unsupported payloads
+with 400 and returns 503 for valid requests. `/shield/*` is not available yet.
 Stop with Ctrl-C.
 
 ## Configuration example
@@ -95,14 +96,17 @@ ephemeral; reusable sessions will require explicit creation. Argon2 parameters
 default to 65536 KiB, 3 iterations, and parallelism 4. Loading requires positive
 iteration/parallelism values and memory of at least eight times parallelism.
 
-The CLI passes the settings to `create_app(config)`, available as `app.state.config`.
-Importing `shield.app:app` directly uses built-in settings without reading YAML;
-use the CLI to load a file. Settings for detection, HTTP timeouts, and persistence
-will be consumed by their implementations in later tasks.
+The CLI passes settings and runtime credentials to `create_app(config, credentials)`.
+Settings are available as `app.state.config`. Importing `shield.app:app` directly
+uses built-in settings without reading YAML or credentials; use the CLI to load
+them. Settings for detection, HTTP timeouts, and persistence will be consumed by
+their implementations in later tasks.
 
-Keep provider credentials in the environment variable named by `api_key_env`.
-Persistent sessions will obtain a passphrase through a non-echoing prompt, while
-default ephemeral requests will keep keys and mappings in memory. The example
+The CLI reads provider credentials from the environment variable named by
+`api_key_env`; a missing key is allowed for this scaffold. Setting
+`sessions.persistent_enabled: true` collects a passphrase through a non-echoing
+startup prompt and fails if echo cannot be disabled. Vault unlock and persistent
+sessions remain Phase 2 work. Default ephemeral operation never prompts. The example
 contains no secrets; local `shield.yaml`, `.env` files, vaults and SQLite sidecars,
 logs, generated datasets, and evaluation results are ignored by Git.
 
@@ -132,7 +136,9 @@ implementation tasks are completed.
 detected spans, in-memory token mappings, session metadata, protection reports,
 and API error envelopes. Models reject unknown fields and implicit coercion;
 Python callers use the supplied enums for entity types, stages, session kinds,
-and error codes. HTTP payload models and error/status handling belong to task #4.
+and error codes. [`shield/api.py`](shield/api.py) defines strict HTTP models;
+[`docs/api-contract.md`](docs/api-contract.md) lists all supported request/response
+fields, buffered SSE behavior, error statuses, and credential handling.
 
 - `DetectedSpan` uses half-open Python string indices (`text[start:end]`), including
   Unicode code points. Call `span.validate_for_text(text)` to check source bounds.
@@ -161,8 +167,8 @@ uv build
 ```
 
 Run the tests with `uv run --locked pytest`. They cover domain contracts,
-configuration validation, threshold precedence, safe startup failures, and CLI
-settings propagation. Use synthetic fixtures and the fake upstream before any
+configuration validation, strict HTTP contracts, safe errors, credential prompts,
+and CLI settings propagation. Use synthetic fixtures and the fake upstream before any
 provider smoke test. Future buffered SSE will wait for the complete upstream
 answer, and detector misses must be measured rather than treated as a guarantee
 that all PII is removed.

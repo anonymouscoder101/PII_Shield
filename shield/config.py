@@ -80,6 +80,7 @@ class VaultConfig(Contract):
 
 class SessionsConfig(Contract):
     default: Literal["ephemeral"] = "ephemeral"
+    persistent_enabled: bool = False
 
 
 class ServerConfig(Contract):

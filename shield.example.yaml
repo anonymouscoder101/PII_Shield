@@ -23,10 +23,12 @@ vault:
 
 sessions:
   default: ephemeral  # Request-local memory; no vault unlock required.
+  persistent_enabled: false  # Opt in to a non-echoing startup passphrase prompt.
 
 server:
   host: 127.0.0.1  # Only this binding is supported.
   port: 8000
 
-# Persistent vault passphrases will be collected with a non-echoing prompt.
+# Persistent vault passphrases are collected with a non-echoing prompt when enabled.
+# Vault unlock and reusable sessions themselves are implemented in Phase 2.
 # Do not put a passphrase or provider key in this file.
