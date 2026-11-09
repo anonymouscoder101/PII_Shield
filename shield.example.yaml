@@ -28,6 +28,8 @@ sessions:
 server:
   host: 127.0.0.1  # Only this binding is supported.
   port: 8000
+  max_request_bytes: 1048576  # 1 MiB; actual body bytes, before JSON parsing.
+  request_timeout_s: 120  # Upload + processing until response headers are ready.
 
 # Persistent vault passphrases are collected with a non-echoing prompt when enabled.
 # Vault unlock and reusable sessions themselves are implemented in Phase 2.

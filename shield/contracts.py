@@ -173,6 +173,7 @@ class ErrorCode(StrEnum):
 
     INVALID_REQUEST = "invalid_request"
     REQUEST_TOO_LARGE = "request_too_large"
+    REQUEST_TIMEOUT = "request_timeout"
     VAULT_LOCKED = "vault_locked"
     SESSION_NOT_FOUND = "session_not_found"
     SESSION_EXPIRED = "session_expired"

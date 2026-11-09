@@ -11,9 +11,13 @@ false, or empty containers. JSON booleans cannot be replaced with strings/intege
 
 `POST /v1/chat/completions` accepts `Content-Type: application/json` (with optional
 parameters such as `charset=utf-8`). It validates the request and returns **503**
-`protection_unavailable` for a valid payload. It makes no upstream calls. Detection,
-protection, restoration, actual buffered SSE delivery, and `/shield/*` endpoints
-are implemented in later phases. `/docs` and `/openapi.json` expose the contract.
+`protection_unavailable` for a valid ephemeral payload. Selecting a persistent
+session while the vault is locked returns **423** `vault_locked`.
+`POST /shield/sessions` is a locked creation stub accepting an empty object or no
+body; it also returns 423. It rejects extra body fields, including credentials.
+The scaffold makes no upstream calls. Detection, protection, restoration, actual
+buffered SSE delivery, and working session endpoints are implemented in later
+phases. `/docs` and `/openapi.json` expose the contract.
 
 ```json
 {
@@ -22,6 +26,35 @@ are implemented in later phases. `/docs` and `/openapi.json` expose the contract
   "stream": false
 }
 ```
+
+## Request limits and session selection
+
+The proxy bounds HTTP request bodies before JSON parsing with
+`server.max_request_bytes` (default 1048576, 1 MiB). Requests exceeding the declared
+or measured byte limit return 413. Chunked requests and requests without a length
+header are counted as they arrive. Duplicate, invalid, and mismatched
+`Content-Length` values return 400. UTF-8 bytes and JSON escapes count toward the
+limit, not the number of characters in decoded content. An incomplete upload or
+oversized body never reaches a route. Rejections can close HTTP/1 connections
+without draining the upload.
+
+`server.request_timeout_s` (default 120 seconds) is a cooperative deadline covering
+body upload and application processing through the first response headers. Expiry
+returns JSON 408 `request_timeout`, including when the client asked for streaming.
+Cancellation propagates to async handlers and runs their `finally` cleanup.
+Synchronous work cannot be forcibly interrupted, but headers arriving after the
+deadline are rejected. Slow response delivery after headers is outside this
+deadline, so future buffered SSE delivery is not truncated by the processing timer.
+These limits do not replace the separate upstream or Stage 2 timeouts implemented
+alongside those clients in later phases.
+
+No `X-Shield-Session` header selects ephemeral operation, with no vault readiness
+lookup. A supplied header must be nonblank and occur exactly once; invalid header
+forms return 400. Valid persistent selections require both
+`sessions.persistent_enabled: true` and a vault service reporting an authenticated
+unlock. All foundation vaults start unavailable, so persistent requests return 423
+even if startup collected a passphrase. Unknown/expired session lookup and reusable
+session creation remain Phase 2 work. No session ID is returned by the foundation.
 
 ## Request fields
 
@@ -111,6 +144,7 @@ All public failures use this envelope with a static message:
 | 400 | `invalid_request` (including malformed JSON and unsupported nested fields) |
 | 404 | `not_found`, `session_not_found` |
 | 405 | `method_not_allowed` (preserves a valid `Allow` header) |
+| 408 | `request_timeout` |
 | 410 | `session_expired` |
 | 413 | `request_too_large` |
 | 415 | `unsupported_media_type` |
@@ -121,9 +155,10 @@ All public failures use this envelope with a static message:
 | 503 | `protection_unavailable`, `detection_failed`, `reviewer_unavailable` |
 | 504 | `upstream_timeout` |
 
-Only validation, framework errors, and the unavailable pipeline are exercised by
-the current chat route. Other codes define behavior for their later components;
-this does not implement request limits, session lookup, or upstream timeouts.
+Validation, request limits, framework errors, locked-vault selection, and the
+unavailable pipeline are exercised by the current chat route. Other codes define
+behavior for their later components; session lookup and upstream timeouts remain
+future work.
 Handlers never return validation inputs, field paths supplied by the caller,
 provider bodies, exception strings, or credentials. Unexpected HTTP exceptions
 produce a fixed log event without traceback text. If an unexpected error occurs

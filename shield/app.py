@@ -1,13 +1,19 @@
 """ASGI scaffold. Protection and proxy endpoints are not implemented yet."""
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 
 from shield import __version__
-from shield.api import ChatCompletionRequest, ChatCompletionResponse
+from shield.api import (
+    ChatCompletionRequest,
+    ChatCompletionResponse,
+    SessionCreateRequest,
+)
 from shield.config import ShieldConfig
 from shield.contracts import APIError, ErrorCode
 from shield.credentials import RuntimeCredentials
 from shield.errors import ShieldError, install_error_handlers, require_json
+from shield.limits import RequestLimitsMiddleware
+from shield.session_access import require_session_access, require_unlocked_vault
 
 
 def create_app(
@@ -26,7 +32,9 @@ def create_app(
     app.state.credentials = (
         credentials if credentials is not None else RuntimeCredentials()
     )
+    app.state.vault = None  # No authenticated vault implementation exists in Phase 1.
     install_error_handlers(app)
+    app.add_middleware(RequestLimitsMiddleware, config=app.state.config.server)
 
     @app.post(
         "/v1/chat/completions",
@@ -51,6 +59,9 @@ def create_app(
                 "description": "Malformed JSON or invalid payload.",
             },
             415: {"model": APIError, "description": "Unsupported content type."},
+            408: {"model": APIError, "description": "Request time budget exceeded."},
+            413: {"model": APIError, "description": "Request body too large."},
+            423: {"model": APIError, "description": "Persistent vault is locked."},
             500: {"model": APIError, "description": "Internal error."},
             503: {
                 "model": APIError,
@@ -63,7 +74,30 @@ def create_app(
             "will use buffered SSE after full restoration."
         ),
     )
-    async def chat_completions(body: ChatCompletionRequest) -> ChatCompletionResponse:
+    async def chat_completions(
+        body: ChatCompletionRequest, request: Request
+    ) -> ChatCompletionResponse:
+        require_session_access(request)
+        raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
+
+    @app.post(
+        "/shield/sessions",
+        responses={
+            "4XX": {"model": APIError, "description": "Invalid session request."},
+            423: {"model": APIError, "description": "Persistent vault is locked."},
+            503: {
+                "model": APIError,
+                "description": "Session storage is not implemented.",
+            },
+        },
+        description=(
+            "Locked foundation stub; reusable session creation arrives in Phase 2."
+        ),
+    )
+    async def create_session(
+        request: Request, body: SessionCreateRequest | None = None
+    ) -> None:
+        require_unlocked_vault(request)
         raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
 
     return app

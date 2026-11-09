@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 ERRORS: dict[ErrorCode, tuple[int, str]] = {
     ErrorCode.INVALID_REQUEST: (400, "Invalid or unsupported request payload."),
     ErrorCode.REQUEST_TOO_LARGE: (413, "Request exceeds the supported size limit."),
+    ErrorCode.REQUEST_TIMEOUT: (408, "Request exceeded its time limit."),
     ErrorCode.VAULT_LOCKED: (423, "Persistent sessions require an unlocked vault."),
     ErrorCode.SESSION_NOT_FOUND: (404, "Session was not found."),
     ErrorCode.SESSION_EXPIRED: (410, "Session has expired."),

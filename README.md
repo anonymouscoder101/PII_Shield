@@ -7,9 +7,10 @@ and [the accepted design decisions](docs/decisions/001-session-storage-and-buffe
 
 ## Current status
 
-Phase 1 tasks #1–5 are implemented: the package scaffold, shared typed domain
+Phase 1 tasks #1–6 are implemented: the package scaffold, shared typed domain
 contracts, validated configuration, strict Chat Completions schemas, safe errors,
-runtime credential loading, and a separate fake upstream with synthetic fixtures.
+runtime credential loading, request limits, locked-vault checks, and a separate
+fake upstream with synthetic fixtures.
 The proxy's `/v1/chat/completions` validates requests and returns 503 until the
 protection pipeline exists. Detection, vault, restoration, and working proxy
 endpoints are future tasks. The proxy scaffold makes no
@@ -60,7 +61,9 @@ uv run --locked python -m shield
 
 The server binds to `127.0.0.1:8000`. Open `http://127.0.0.1:8000/docs` to inspect
 the supported request schema. `/v1/chat/completions` rejects unsupported payloads
-with 400 and returns 503 for valid requests. `/shield/*` is not available yet.
+with 400 and returns 503 for valid ephemeral requests. Persistent requests and
+`POST /shield/sessions` return 423 while the vault is locked. Other `/shield/*`
+endpoints are not available yet.
 Stop with Ctrl-C.
 
 ## Run the fake upstream
@@ -133,6 +136,23 @@ Settings are available as `app.state.config`. Importing `shield.app:app` directl
 uses built-in settings without reading YAML or credentials; use the CLI to load
 them. Settings for detection, HTTP timeouts, and persistence will be consumed by
 their implementations in later tasks.
+
+The proxy enforces `server.max_request_bytes` (default **1048576 bytes**, 1 MiB)
+before JSON parsing, and `server.request_timeout_s` (default **120 seconds**) from
+body upload through response-header creation. Oversized bodies return 413; expired
+requests return 408. Actual bytes are counted for chunked or falsely declared
+uploads. Invalid, duplicate, or mismatched `Content-Length` values return 400.
+Limits also apply to session requests and other HTTP routes. Delivery after
+response headers is outside this deadline, including future buffered SSE.
+The timeout cooperatively cancels async work and runs its cleanup; synchronous
+work cannot be forcibly interrupted, and late headers are rejected when it returns.
+
+Selecting `X-Shield-Session` requires an enabled, authenticated unlocked vault.
+The foundation initializes the vault as unavailable, so a passphrase collected at
+startup still leaves persistent requests locked. `POST /shield/sessions` accepts
+an empty object or no body and returns 423. Default requests without that header
+never consult vault readiness. Real unlock, lookup, expiry, and persistent session
+creation remain Phase 2 work.
 
 The CLI reads provider credentials from the environment variable named by
 `api_key_env`; a missing key is allowed for this scaffold. Setting

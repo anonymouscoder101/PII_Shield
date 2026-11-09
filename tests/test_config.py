@@ -43,6 +43,36 @@ def test_example_loads_without_credentials_or_model_dependencies():
     assert create_app(config).state.config is config
 
 
+def test_request_limits_are_loaded_from_yaml(tmp_path):
+    config = load_config(
+        write_config(
+            tmp_path, "server: {max_request_bytes: 4096, request_timeout_s: 2.5}"
+        )
+    )
+    assert config.server.max_request_bytes == 4096
+    assert config.server.request_timeout_s == 2.5
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        "max_request_bytes: 0",
+        "max_request_bytes: -1",
+        "max_request_bytes: true",
+        "max_request_bytes: 1.5",
+        "max_request_bytes: '1024'",
+        "request_timeout_s: 0",
+        "request_timeout_s: -1",
+        "request_timeout_s: .nan",
+        "request_timeout_s: .inf",
+        "request_timeout_s: true",
+    ],
+)
+def test_invalid_request_limits_fail_configuration(tmp_path, settings):
+    with pytest.raises(ConfigurationError):
+        load_config(write_config(tmp_path, f"server: {{{settings}}}"))
+
+
 @pytest.mark.parametrize(
     "mode,expected", [("fast", 0.6), ("balanced", 0.5), ("paranoid", 0.3)]
 )

@@ -14,6 +14,10 @@ PositiveInt = Annotated[int, Field(ge=1)]
 FinishReason = Literal["stop", "length", "content_filter"]
 
 
+class SessionCreateRequest(Contract):
+    """Session creation takes no fields; passphrases never arrive over HTTP."""
+
+
 class ChatMessage(Contract):
     role: Literal["system", "developer", "user", "assistant"]
     content: str = Field(repr=False)

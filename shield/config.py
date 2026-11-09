@@ -87,6 +87,8 @@ class ServerConfig(Contract):
     # The supported deployment is a single-user IPv4 localhost service.
     host: Literal["127.0.0.1"] = "127.0.0.1"
     port: Annotated[int, Field(ge=1, le=65535)] = 8000
+    max_request_bytes: Annotated[int, Field(ge=1)] = 1048576
+    request_timeout_s: PositiveDuration = 120.0
 
 
 class ShieldConfig(Contract):
