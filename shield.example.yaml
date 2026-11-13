@@ -8,6 +8,11 @@ upstream:
 detection:
   mode: balanced  # fast=0.6 | balanced=0.5 | paranoid=0.3
   # threshold: 0.5  # An explicit value overrides the mode default.
+  phone_regions: [US]  # Nonempty, unique supported uppercase region codes.
+  location_policy: all  # all=GPE/LOC/FAC | places=GPE/LOC | none
+  address_policy: street  # street=numbered English street baseline | none
+  employee_id_enabled: true
+  employee_id_pattern: '\bEMP-\d{4,8}\b'  # Whole match must be only the identifier.
   stage2_model: llama3.1:8b
   stage2_timeout_s: 10
   on_stage2_failure: fail_closed  # fail_closed | fail_open

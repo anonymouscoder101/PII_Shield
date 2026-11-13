@@ -3,7 +3,9 @@
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
+import regex
 import yaml
+from phonenumbers import SUPPORTED_REGIONS
 from pydantic import Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from shield.contracts import Contract
@@ -39,6 +41,40 @@ class DetectionConfig(Contract):
     mode: Literal["fast", "balanced", "paranoid"] = "balanced"
     threshold: Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)] | None = None
     allowlist: list[NonBlankString] = Field(default_factory=list)
+    phone_regions: Annotated[list[str], Field(min_length=1)] = Field(
+        default_factory=lambda: ["US"]
+    )
+    location_policy: Literal["all", "places", "none"] = "all"
+    address_policy: Literal["street", "none"] = "street"
+    employee_id_enabled: bool = True
+    employee_id_pattern: Annotated[
+        str, Field(min_length=1, max_length=512, repr=False)
+    ] = r"\bEMP-\d{4,8}\b"
+
+    @field_validator("phone_regions")
+    @classmethod
+    def valid_phone_regions(cls, regions: list[str]) -> list[str]:
+        if len(regions) != len(set(regions)) or any(
+            region not in SUPPORTED_REGIONS for region in regions
+        ):
+            raise ValueError(
+                "phone regions must be unique supported uppercase region codes"
+            )
+        return regions
+
+    @field_validator("employee_id_pattern")
+    @classmethod
+    def valid_employee_pattern(cls, value: str) -> str:
+        try:
+            compiled = regex.compile(
+                value, regex.IGNORECASE | regex.MULTILINE | regex.DOTALL
+            )
+            if compiled.search("", timeout=0.05) is not None:
+                raise ValueError("employee pattern must not match empty text")
+        except regex.error, TimeoutError:
+            raise ValueError("employee pattern must be a valid bounded regex") from None
+        return value
+
     stage2_model: NonBlankString = "llama3.1:8b"
     stage2_timeout_s: PositiveDuration = 10.0
     on_stage2_failure: Literal["fail_closed", "fail_open"] = "fail_closed"

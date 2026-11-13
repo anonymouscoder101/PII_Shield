@@ -33,7 +33,7 @@ def test_model_and_all_recognizers_are_present(detector):
         "ShieldStreetAddressRecognizer",
     )
     assert "PERSON" in detector.ner_labels
-    assert not {"DATE_OF_BIRTH", "API_KEY", "SECRET", "EMPLOYEE_ID"} & {
+    assert {"DATE_OF_BIRTH", "API_KEY", "SECRET", "EMPLOYEE_ID"} <= {
         entity.value for entity in detector.capabilities
     }
 

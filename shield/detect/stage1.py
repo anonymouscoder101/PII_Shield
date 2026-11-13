@@ -28,7 +28,14 @@ from presidio_analyzer.predefined_recognizers import (
 )
 from spacy.language import Language
 
+from shield.config import DetectionConfig
 from shield.contracts import DetectedSpan, EntityType
+from shield.detect.recognizers import (
+    ApiKeyRecognizer,
+    DateOfBirthRecognizer,
+    SecretRecognizer,
+    employee_id_recognizer,
+)
 
 MODEL_NAME = "en_core_web_lg"
 MODEL_VERSION = "3.8.0"
@@ -41,6 +48,10 @@ STAGE1_ENTITIES = (
     EntityType.LOCATION,
     EntityType.ADDRESS,
     EntityType.IP_ADDRESS,
+    EntityType.DATE_OF_BIRTH,
+    EntityType.API_KEY,
+    EntityType.SECRET,
+    EntityType.EMPLOYEE_ID,
 )
 _NER_MAPPING = {
     "PERSON": "PERSON",
@@ -78,7 +89,11 @@ class _StrictRegex:
 
     def finditer(self, *args, **kwargs):
         try:
-            yield from self._compiled.finditer(*args, **kwargs)
+            for match in self._compiled.finditer(*args, **kwargs):
+                start, end = match.span()
+                if end <= start:
+                    raise Stage1DetectionError("Stage 1 detection failed.")
+                yield match
         except TimeoutError:
             raise Stage1DetectionError("Stage 1 detection failed.") from None
 
@@ -91,12 +106,40 @@ class Stage1Detector:
     Registry availability is capability metadata, not a recall guarantee.
     """
 
-    def __init__(self, nlp: Language):
+    def __init__(self, nlp: Language, config: DetectionConfig | None = None):
+        self.config = config if config is not None else DetectionConfig()
+        self.entities = tuple(
+            entity
+            for entity in STAGE1_ENTITIES
+            if not (
+                (
+                    entity == EntityType.LOCATION
+                    and self.config.location_policy == "none"
+                )
+                or (
+                    entity == EntityType.ADDRESS
+                    and self.config.address_policy == "none"
+                )
+                or (
+                    entity == EntityType.EMPLOYEE_ID
+                    and not self.config.employee_id_enabled
+                )
+            )
+        )
+        mapping = {
+            label: entity
+            for label, entity in _NER_MAPPING.items()
+            if label == "PERSON"
+            or (
+                self.config.location_policy != "none"
+                and (label != "FAC" or self.config.location_policy == "all")
+            )
+        }
         try:
             if nlp.lang != "en" or "ner" not in nlp.pipe_names:
                 raise ValueError("English NER required")
             labels = set(nlp.get_pipe("ner").labels)
-            if not {"PERSON", "GPE", "LOC", "FAC"} <= labels:
+            if not set(mapping) <= labels:
                 raise ValueError("required NER labels missing")
             self.ner_labels = tuple(sorted(labels))
             self.model_name = f"{nlp.lang}_{nlp.meta.get('name', 'pipeline')}"
@@ -104,15 +147,15 @@ class Stage1Detector:
             engine = SpacyNlpEngine(
                 models=[{"lang_code": "en", "model_name": MODEL_NAME}],
                 ner_model_configuration=NerModelConfiguration(
-                    model_to_presidio_entity_mapping=_NER_MAPPING.copy(),
-                    labels_to_ignore=sorted(labels - set(_NER_MAPPING)),
+                    model_to_presidio_entity_mapping=mapping,
+                    labels_to_ignore=sorted(labels - set(mapping)),
                     default_score=0.85,
                 ),
             )
             # Already loaded: avoids Presidio's automatic model download path.
             engine.nlp = {"en": nlp}
             recognizers = [
-                SpacyRecognizer(supported_entities=["PERSON", "LOCATION"]),
+                SpacyRecognizer(supported_entities=sorted(set(mapping.values()))),
                 # Reuse upstream email patterns without network-dependent public
                 # suffix validation. Internal/synthetic dotted domains are valid.
                 PatternRecognizer(
@@ -121,7 +164,7 @@ class Stage1Detector:
                     context=EmailRecognizer.CONTEXT,
                     name="ShieldEmailRecognizer",
                 ),
-                PhoneRecognizer(supported_regions=["US"]),
+                PhoneRecognizer(supported_regions=self.config.phone_regions.copy()),
                 CreditCardRecognizer(),
                 UsSsnRecognizer(),
                 IpRecognizer(),
@@ -138,6 +181,19 @@ class Stage1Detector:
                     ],
                 ),
             ]
+            recognizers.extend(
+                [DateOfBirthRecognizer(), ApiKeyRecognizer(), SecretRecognizer()]
+            )
+            if self.config.employee_id_enabled:
+                recognizers.append(
+                    employee_id_recognizer(self.config.employee_id_pattern)
+                )
+            if self.config.address_policy == "none":
+                recognizers = [
+                    rec
+                    for rec in recognizers
+                    if "ADDRESS" not in rec.supported_entities
+                ]
             for recognizer in recognizers:
                 if isinstance(recognizer, PatternRecognizer):
                     # Pattern instances on built-ins can be class-level mutable
@@ -161,7 +217,7 @@ class Stage1Detector:
                 default_score_threshold=0,
             )
             available = set(self._analyzer.get_supported_entities(language="en"))
-            if not {entity.value for entity in STAGE1_ENTITIES} <= available:
+            if not {entity.value for entity in self.entities} <= available:
                 raise ValueError("required recognizer unavailable")
             self.capabilities = {
                 entity: tuple(
@@ -171,7 +227,7 @@ class Stage1Detector:
                         if entity.value in rec.supported_entities
                     )
                 )
-                for entity in STAGE1_ENTITIES
+                for entity in self.entities
             }
             if not all(self.capabilities.values()):
                 raise ValueError("required recognizer unavailable")
@@ -180,12 +236,12 @@ class Stage1Detector:
             raise DetectorUnavailable("Stage 1 recognizers are unavailable.") from None
 
     @classmethod
-    def load(cls) -> Stage1Detector:
+    def load(cls, config: DetectionConfig | None = None) -> Stage1Detector:
         try:
             if version(MODEL_NAME) != MODEL_VERSION:
                 raise ValueError("unsupported model version")
             nlp = spacy.load(MODEL_NAME, exclude=["parser"])
-            return cls(nlp)
+            return cls(nlp, config=config)
         except Exception:
             raise DetectorUnavailable(
                 "Stage 1 model is unavailable; install the pinned stage1 extra."
@@ -202,14 +258,14 @@ class Stage1Detector:
                 results = self._analyzer.analyze(
                     text=text,
                     language="en",
-                    entities=[entity.value for entity in STAGE1_ENTITIES],
+                    entities=[entity.value for entity in self.entities],
                     score_threshold=0.0,
                     return_decision_process=False,
                 )
                 spans = []
                 for result in results:
                     entity = EntityType(result.entity_type)
-                    if entity not in STAGE1_ENTITIES:
+                    if entity not in self.entities:
                         raise ValueError("unsupported detector result")
                     spans.append(
                         DetectedSpan(

@@ -75,3 +75,10 @@ availability, missing-model/version failures, Unicode offsets, repeated entities
 clean input, source-free spans and errors, no network during scanning, debug-log
 privacy, malformed result rejection and fail-closed regex timeouts. These tests
 require the `stage1` extra; they are not silently skipped when it is absent.
+
+
+`test_custom_recognizers.py` checks labeled and invalid birth dates, API/secret
+value-only spans, Unicode/repetition and debug privacy, custom employee patterns,
+GB national phone detection, enabled capability policies, invalid/sensitive
+configuration failures and zero-width regex rejection. The full detector tests
+continue to use the pinned local model and synthetic text only.
