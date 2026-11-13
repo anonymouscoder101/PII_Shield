@@ -1,7 +1,8 @@
 """Opt-in SQLite storage for encrypted persistent-session rows.
 
 This layer accepts ciphertext, never TokenMapping/original values or raw keys.
-It does not unlock a vault, encrypt values, or manage session lifetimes. Those
+Explicit initialization/unlock derives keys; entry encryption and session lifetimes
+are handled by later services. Those
 services must authenticate stored rows with ``entry_aad`` before using values.
 Constructing a store does no I/O; only explicitly entering it opens the database.
 """
@@ -15,9 +16,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretBytes, SecretStr, model_validator
 
+from shield.config import Argon2Config
 from shield.contracts import Contract, EntityType, NonEmptyString
+from shield.vault_crypto import (
+    VaultInitializationError,
+    VaultUnlockError,
+    initialize_header,
+    unlock_header,
+)
 
 SCHEMA_VERSION = 1
 Nonce = Annotated[bytes, Field(min_length=12, max_length=12, repr=False)]
@@ -258,3 +266,50 @@ class VaultStore:
         """Atomically insert a batch; identity/token conflicts never overwrite rows."""
         with self.transaction() as db:
             self._insert_entries(db, entries)
+
+    def initialize(
+        self, passphrase: SecretStr, *, params: Argon2Config | None = None
+    ) -> SecretBytes:
+        """Initialize an empty vault once; never replace keys or existing metadata.
+
+        Metadata and verifier commit together. The returned key is in memory only;
+        no key or unlock readiness is retained by this low-level store.
+        """
+        with self.transaction() as db:
+            if any(
+                db.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone()
+                for table in ("vault_meta", "sessions", "entries")
+            ):
+                raise VaultInitializationError(
+                    "Vault is already initialized or nonempty."
+                )
+            header, key = initialize_header(
+                passphrase,
+                params if params is not None else Argon2Config(),
+                SCHEMA_VERSION,
+            )
+            db.execute(
+                "INSERT INTO vault_meta "
+                "(id, salt, kdf_params, verifier_nonce, verifier_ct, schema_version) "
+                "VALUES (1, ?, ?, ?, ?, ?)",
+                (
+                    header.salt,
+                    header.kdf_params.model_dump_json(),
+                    header.verifier_nonce,
+                    header.verifier_ct,
+                    header.schema_version,
+                ),
+            )
+        return key
+
+    def unlock(self, passphrase: SecretStr) -> SecretBytes:
+        """Authenticate with stored KDF parameters, without changing the header."""
+        with self.transaction() as db:
+            row = db.execute(
+                "SELECT salt, kdf_params, verifier_nonce, verifier_ct, schema_version "
+                "FROM vault_meta WHERE id = 1"
+            ).fetchone()
+            if row is None:
+                raise VaultUnlockError("Vault unlock failed.")
+            key = unlock_header(row, passphrase, SCHEMA_VERSION)
+        return key

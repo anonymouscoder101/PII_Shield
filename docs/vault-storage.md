@@ -1,10 +1,10 @@
 # Persistent vault storage
 
-Phase 2 task 1 adds `shield/vault.py`. It is an internal persistence layer,
+Phase 2 tasks 1–2 add `shield/vault.py`. It is an internal persistence layer,
 opened explicitly with `with VaultStore(path) as store:`. Constructing a store
 or starting the proxy does not open SQLite or create vault directories. Default
 ephemeral requests continue to bypass the vault; the app's persistent session
-routes remain locked until authenticated unlock and session management exist.
+routes remain locked until the session service and its authenticated startup flow are wired.
 
 ## Schema version 1
 
@@ -17,7 +17,7 @@ are no migrations yet. The original design's unversioned schema is unsupported.
 The tables follow the revised design document:
 
 - `vault_meta`: singleton `id = 1`, salt, serialized KDF parameters, verifier
-  nonce and ciphertext, schema version. Task 2 will populate this table; an empty
+  nonce and ciphertext, schema version. Explicit initialization populates this table; an empty
   table indicates schema initialization only and does not establish vault readiness.
 - `sessions`: session ID, wrapped HMAC key nonce/ciphertext, creation and expiry
   timestamps in integer Unix seconds. Only persistent sessions belong here.
@@ -54,7 +54,7 @@ domain, schema version, session, token, type, and full digest when used by AES-G
 Task 3 will use it for production encryption and authenticated reads. This storage
 layer accepts already-encrypted rows; it cannot prove supplied bytes are ciphertext
 or authenticate them by itself. It accepts no original-value or raw-key argument.
-Task 2 supplies the KDF/unlock verifier and task 4 supplies wrapped-key AAD.
+The unlock verifier uses a separate domain; task 4 supplies wrapped-key AAD.
 
 ## Disk behavior and limitations
 
@@ -74,3 +74,48 @@ and keyed full digests remain visible. Do not log SQLite exception text or row
 values. Deleting rows removes active sessions and entries; it does not prevent
 recovery from old database copies, backups, or retained journal pages. Python
 memory and host swap also prevent a secure memory-erasure guarantee.
+
+
+## Vault initialization and unlock
+
+On an explicitly opened store, `initialize(SecretStr(...), params=Argon2Config(...))`
+creates a random 16-byte salt and derives a 32-byte vault key with Argon2id
+(version 19). Defaults are `memory_kib=65536` (64 MiB), `time_cost=3`, and
+`parallelism=4`. Passphrases are UTF-8 encoded without normalization or trimming;
+empty or whitespace-only passphrases are rejected. Explicit nondefault settings
+are stored with the vault and used on every subsequent unlock.
+
+Initialization encrypts a fixed verifier using AES-256-GCM and a fresh random
+12-byte nonce. Verifier AAD is compact, sorted-key ASCII JSON:
+
+```text
+["pii-shield/verifier", schema_version, salt_hex, kdf_parameter_object]
+```
+
+The object includes `algorithm`, `version`, `hash_len`, `memory_kib`, `time_cost`,
+and `parallelism`. This domain is distinct from entry AAD. All parameters must
+be present and valid. Salt, parameters, verifier nonce/ciphertext and schema
+version commit in one transaction. Initialization refuses any existing metadata,
+sessions or entries; it never overwrites a vault or silently resets its key.
+
+`unlock(SecretStr(...))` validates metadata, derives with the stored parameters,
+and authenticates the verifier before returning a key. Wrong passphrases and
+corrupt metadata raise the same static `VaultUnlockError`. No automatic
+reinitialization follows a failed unlock. The header is unchanged on failure.
+Missing metadata in a nonempty vault is an error requiring investigation.
+
+Both methods return `SecretBytes`; trusted encryption code must explicitly
+extract its 32 bytes. The store does not cache the key or set an unlocked flag.
+The passphrase and key are never persisted or logged. The caller owns key
+lifetime; secret wrappers mask representations but do not securely erase memory.
+The current CLI still only collects credentials. Startup unlock, persistent API
+sessions, entry encryption and wrapped HMAC keys are subsequent Phase 2 tasks.
+
+Stored KDF metadata is untrusted. Before allocation, parameter JSON is limited
+to 1024 characters, extra/missing fields and unsupported algorithms/versions/key
+lengths are rejected, and costs are bounded to at most 1 GiB memory, 10 passes,
+and 16 lanes. Memory must also be at least eight times the lane count. These are
+local resource limits, applied on creation and unlock; higher settings require
+an explicit code/policy change. Existing lower-cost explicit configurations are
+supported, but the documented defaults are recommended. Unlock is synchronous
+and must not run on a request event loop; later startup integration will manage it.

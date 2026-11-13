@@ -32,4 +32,10 @@ foreign keys and cascading deletes, digest/token uniqueness, transaction rollbac
 on conflicts and cancellation, restrictive database/journal permissions, and
 full-identity AAD with synthetic AES-GCM ciphertext. The storage round-trip test
 checks that its seeded plaintext is absent from database and journal bytes;
-production encryption and unlock remain later Phase 2 tasks.
+production entry encryption remains a later Phase 2 task.
+
+
+`test_vault_unlock.py` exercises real Argon2id with the documented defaults,
+stored custom parameters, fresh salts/nonces, restart unlock, wrong passphrases,
+metadata tampering, cost bounds, initialization rollback, and secret absence on
+disk. Most negative tests use explicitly reduced synthetic-test KDF costs.
