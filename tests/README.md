@@ -45,3 +45,9 @@ disk. Most negative tests use explicitly reduced synthetic-test KDF costs.
 Unicode spelling preservation, fresh nonces, complete AAD binding, tampered/swapped
 rows, exact session lookup, wrong key sizes, atomic encrypted-batch rollback,
 restart recovery and plaintext absence from database/journal/WAL/SHM artifacts.
+
+
+`test_session_keys.py` checks fresh independent ephemeral keys, mapping isolation,
+cleanup on failure/cancellation, real chat request integration without SQLite,
+persistent-only key wrapping, fresh nonces, 32-byte key requirements, full wrapped
+key AAD binding, restart recovery and absence of raw key bytes from disk.

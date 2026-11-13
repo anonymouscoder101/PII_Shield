@@ -13,6 +13,7 @@ from shield.contracts import APIError, ErrorCode
 from shield.credentials import RuntimeCredentials
 from shield.errors import ShieldError, install_error_handlers, require_json
 from shield.limits import RequestLimitsMiddleware
+from shield.session import ephemeral_session
 from shield.session_access import require_session_access, require_unlocked_vault
 
 
@@ -78,6 +79,9 @@ def create_app(
         body: ChatCompletionRequest, request: Request
     ) -> ChatCompletionResponse:
         require_session_access(request)
+        if "x-shield-session" not in request.headers:
+            with ephemeral_session():
+                raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
         raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
 
     @app.post(

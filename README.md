@@ -11,9 +11,10 @@ Phase 1 tasks #1–6 are implemented: the package scaffold, shared typed domain
 contracts, validated configuration, strict Chat Completions schemas, safe errors,
 runtime credential loading, request limits, locked-vault checks, and a separate
 fake upstream with synthetic fixtures.
-Phase 2 tasks #1–3 add an opt-in SQLite storage module with a versioned schema,
+Phase 2 tasks #1–4 add an opt-in SQLite storage module with a versioned schema,
 transactional ciphertext inserts, full-digest constraints, Argon2id key derivation, an authenticated unlock verifier, and AES-GCM entry
-encryption with authenticated reads.
+encryption with authenticated reads. Ephemeral requests receive independent
+memory-only HMAC keys; explicit persistent keys can be wrapped for disk storage.
 See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
 The proxy's `/v1/chat/completions` validates requests and returns 503 until the
 protection pipeline exists. Detection, session lifecycle/startup unlock, restoration, and working proxy

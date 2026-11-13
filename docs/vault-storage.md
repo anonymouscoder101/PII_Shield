@@ -1,6 +1,6 @@
 # Persistent vault storage
 
-Phase 2 tasks 1–3 add `shield/vault.py`. It is an internal persistence layer,
+Phase 2 tasks 1–4 add `shield/vault.py`. It is an internal persistence layer,
 opened explicitly with `with VaultStore(path) as store:`. Constructing a store
 or starting the proxy does not open SQLite or create vault directories. Default
 ephemeral requests continue to bypass the vault; the app's persistent session
@@ -55,7 +55,7 @@ domain, schema version, session, token, type, and full digest when used by AES-G
 encryption and authenticated reads. Raw `insert_entries` accepts already-encrypted
 rows and cannot verify supplied bytes without a key. Prefer `insert_mappings`
 and `read_mapping` for value storage and restoration.
-The unlock verifier uses a separate domain; task 4 supplies wrapped-key AAD.
+The unlock verifier and wrapped session keys use separate AAD domains.
 
 ## Disk behavior and limitations
 
@@ -110,7 +110,7 @@ extract its 32 bytes. The store does not cache the key or set an unlocked flag.
 The passphrase and key are never persisted or logged. The caller owns key
 lifetime; secret wrappers mask representations but do not securely erase memory.
 The current CLI still only collects credentials. Startup unlock, persistent API
-sessions and wrapped HMAC keys are subsequent Phase 2 tasks.
+sessions are subsequent Phase 2 tasks.
 
 Stored KDF metadata is untrusted. Before allocation, parameter JSON is limited
 to 1024 characters, extra/missing fields and unsupported algorithms/versions/key
@@ -146,5 +146,44 @@ Production tests exercise restart reads and plaintext absence from database,
 rollback-journal and WAL/SHM files, plus nonce, ciphertext, digest, identity and
 cross-session row swaps. Metadata such as tokens and full keyed digests remains
 visible by design. The unchanged session endpoints remain locked until the
-session service is implemented. Fresh per-request keys and persistent key wrapping
-are task 4; session lifetime and request concurrency are tasks 5 and 6.
+session service is implemented. Session lifetime and request concurrency are
+tasks 5 and 6.
+
+
+## HMAC session keys
+
+`shield/session.py` has no vault dependency. `generate_hmac_key()` draws 32 fresh
+random bytes and returns a masked `SecretBytes`. `ephemeral_session()` creates
+one request-local key, internal ID, and mapping dictionary. Its `finally` path
+clears mappings and drops its key reference on normal completion, exceptions,
+timeout or cancellation. Each valid chat request without `X-Shield-Session` uses
+this context, including the current blocked proxy scaffold. It creates no SQLite
+files or reusable session headers. Supplied session IDs follow the locked-vault
+checks and do not silently create ephemeral replacements.
+
+`wrap_session_key(record, key, vault_key)` accepts only a `SessionRecord` whose
+kind is explicitly `persistent`. It wraps a 32-byte HMAC key using AES-256-GCM
+under the 32-byte vault key, with a fresh random 12-byte nonce, and returns a
+`PersistentSessionRow`. Only that ciphertext row is passed to `insert_session`.
+Wrapping performs no I/O and is never invoked for default ephemeral requests.
+
+Wrapped-key AAD is compact ASCII-escaped UTF-8 JSON with this fixed order:
+
+```text
+["pii-shield/session-key", schema_version, session_id, created_at, expires_at]
+```
+
+Both timestamps are integer Unix seconds, matching stored rows. Subsecond
+lifetimes that collapse to a zero-second interval cannot be persisted. This
+separate domain prevents ciphertext substitution with entries or the verifier.
+Binding the lifetime also makes stored timestamp edits fail authentication.
+`unwrap_session_key(row, vault_key)` authenticates before returning a masked
+32-byte key. Wrong keys, changed identity/timestamps/nonces/ciphertexts and domain
+or schema substitutions raise static `VaultSessionKeyError` failures. Helpers
+neither cache unwrapped keys nor bypass session authorization. Checking whether a
+session is expired, managing deletion, and wiring the reusable-session endpoints
+remain task 5 work.
+
+Request cleanup releases owned references rather than erasing memory; callers
+must not retain or log extracted keys or mappings. Persistent ciphertexts remain
+recoverable from old copies using the vault passphrase, as documented above.

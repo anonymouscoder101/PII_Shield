@@ -20,7 +20,14 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import Field, SecretBytes, SecretStr, model_validator
 
 from shield.config import Argon2Config
-from shield.contracts import Contract, EntityType, NonEmptyString, TokenMapping
+from shield.contracts import (
+    Contract,
+    EntityType,
+    NonEmptyString,
+    SessionKind,
+    SessionRecord,
+    TokenMapping,
+)
 from shield.vault_crypto import (
     VaultInitializationError,
     VaultUnlockError,
@@ -93,7 +100,7 @@ class VaultEntryError(ValueError):
     """Static entry failure without values, keys, digests or crypto exceptions."""
 
 
-def _entry_cipher(key: SecretBytes) -> AESGCM:
+def _vault_cipher(key: SecretBytes) -> AESGCM:
     raw = key.get_secret_value()
     if len(raw) != 32:
         raise ValueError("vault key must have 32 bytes")
@@ -107,7 +114,7 @@ def encrypt_entry(mapping: TokenMapping, key: SecretBytes) -> EntryRow:
     This function performs no I/O and retains neither key nor original value.
     """
     try:
-        cipher = _entry_cipher(key)
+        cipher = _vault_cipher(key)
         nonce = os.urandom(12)
         ciphertext = cipher.encrypt(
             nonce,
@@ -129,7 +136,7 @@ def encrypt_entry(mapping: TokenMapping, key: SecretBytes) -> EntryRow:
 def decrypt_entry(row: EntryRow, key: SecretBytes) -> TokenMapping:
     """Release a value only after AES-GCM authenticates its entire row identity."""
     try:
-        value = _entry_cipher(key).decrypt(row.nonce, row.ciphertext, entry_aad(row))
+        value = _vault_cipher(key).decrypt(row.nonce, row.ciphertext, entry_aad(row))
         return TokenMapping(
             session_id=row.session_id,
             token=row.token,
@@ -139,6 +146,78 @@ def decrypt_entry(row: EntryRow, key: SecretBytes) -> TokenMapping:
         )
     except ValueError, InvalidTag:
         raise VaultEntryError("Vault entry authentication failed.") from None
+
+
+class VaultSessionKeyError(ValueError):
+    """Static wrapped-key failure, without exposing key bytes or crypto errors."""
+
+
+def _session_times(row: PersistentSessionRow | SessionRecord) -> tuple[int, int]:
+    if isinstance(row, SessionRecord):
+        if row.kind != SessionKind.PERSISTENT or row.expires_at is None:
+            raise ValueError("persistent session required")
+        return int(row.created_at.timestamp()), int(row.expires_at.timestamp())
+    return row.created_at, row.expires_at
+
+
+def session_key_aad(
+    row: PersistentSessionRow | SessionRecord, *, schema_version: int = SCHEMA_VERSION
+) -> bytes:
+    """Bind wrapped HMAC keys to their session and lifetime in a distinct domain."""
+    created_at, expires_at = _session_times(row)
+    return json.dumps(
+        [
+            "pii-shield/session-key",
+            schema_version,
+            row.session_id,
+            created_at,
+            expires_at,
+        ],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def wrap_session_key(
+    record: SessionRecord, key: SecretBytes, vault_key: SecretBytes
+) -> PersistentSessionRow:
+    """Wrap only explicitly persistent keys; this helper performs no writes."""
+    try:
+        created_at, expires_at = _session_times(record)
+        raw = key.get_secret_value()
+        if len(raw) != 32:
+            raise ValueError("session key must have 32 bytes")
+        cipher = _vault_cipher(vault_key)
+        nonce = os.urandom(12)
+        ct = cipher.encrypt(nonce, raw, session_key_aad(record))
+        return PersistentSessionRow(
+            session_id=record.session_id,
+            sk_nonce=nonce,
+            sk_ct=ct,
+            created_at=created_at,
+            expires_at=expires_at,
+        )
+    except ValueError, OSError:
+        raise VaultSessionKeyError("Session key wrapping failed.") from None
+
+
+def unwrap_session_key(
+    row: PersistentSessionRow, vault_key: SecretBytes
+) -> SecretBytes:
+    """Authenticate wrapped key identity before releasing the 32-byte HMAC key.
+
+    Authentication binds lifetime metadata; expiry enforcement is the session
+    service's responsibility. This function neither caches keys nor opens SQLite.
+    """
+    try:
+        raw = _vault_cipher(vault_key).decrypt(
+            row.sk_nonce, row.sk_ct, session_key_aad(row)
+        )
+        if len(raw) != 32:
+            raise ValueError("session key must have 32 bytes")
+        return SecretBytes(raw)
+    except ValueError, InvalidTag:
+        raise VaultSessionKeyError("Session key authentication failed.") from None
 
 
 class VaultSchemaError(RuntimeError):
