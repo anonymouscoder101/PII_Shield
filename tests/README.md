@@ -90,3 +90,11 @@ Unicode/repeated terms, transitive/nested/adjacent spans, input-order invariance
 filter-before-merge bridges, deterministic ties and disclosure coverage. A
 Hypothesis test checks accepted character coverage and ordering across generated
 span sets. `test_stage1.py` also verifies detector-plus-policy integration.
+
+
+`test_pseudonym.py` checks type-specific normalization, exact preservation of
+secrets/case-sensitive identifiers, email local-part case, numeric formatting and
+extensions, Unicode/canonical equivalence, IP prefixes/zones, and conservative
+fallbacks. It verifies HMAC input bytes, full digests, stable labels, bounded Base32
+suffixes, masked outputs, session independence, and normalization idempotence.
+These tests require no model, database or provider calls.
