@@ -1,1 +1,1 @@
-"""Stage 1 recognizers, span resolution, and contextual review will live here."""
+"""Local Stage 1 detection; policy resolution and contextual review follow later."""

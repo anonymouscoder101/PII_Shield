@@ -23,7 +23,8 @@ request framing, upload/processing deadlines, cancellation cleanup, and response
 delivery after headers. `test_session_access.py` checks that a locked vault blocks
 persistent selection and creation, while ephemeral requests ignore vault readiness.
 
-Run `uv run --locked pytest`. All fixtures must use synthetic values. The
+Install the pinned model with `uv sync --locked --extra stage1`, then run
+`uv run --locked --extra stage1 pytest`. All fixtures must use synthetic values. The
 detailed verification strategy is in
 `IMPLEMENTATION_PLAN.md`.
 
@@ -66,3 +67,11 @@ pinning, shutdown drain and vault ownership. Send callbacks verify committed
 rows through an independent SQLite connection. Failed commits never invoke the
 callback; timeout/cancellation release keys and leases. Concurrent ephemeral
 contexts retain independent mappings and keys.
+
+
+`test_stage1.py` loads the real pinned local spaCy model once and exercises all
+baseline entity types with synthetic text. It checks capability/NER-label
+availability, missing-model/version failures, Unicode offsets, repeated entities,
+clean input, source-free spans and errors, no network during scanning, debug-log
+privacy, malformed result rejection and fail-closed regex timeouts. These tests
+require the `stage1` extra; they are not silently skipped when it is absent.

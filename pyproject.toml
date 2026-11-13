@@ -16,12 +16,18 @@ dependencies = [
     "presidio-analyzer>=2.2,<3",
     "pydantic>=2.10,<3",
     "pyyaml>=6,<7",
-    "spacy>=3.8,<4",
+    "regex>=2025",
+    "spacy>=3.8,<3.9",
     "uvicorn>=0.34,<1",
 ]
 
 [project.scripts]
 pii-shield = "shield.__main__:main"
+
+[project.optional-dependencies]
+stage1 = [
+    "en-core-web-lg",
+]
 
 [dependency-groups]
 dev = [
@@ -45,3 +51,6 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.uv.sources]
+en-core-web-lg = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }

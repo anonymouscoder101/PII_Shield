@@ -18,9 +18,11 @@ encryption with authenticated reads. Ephemeral requests receive independent
 memory-only HMAC keys. Optional persistent sessions support startup unlock,
 creation, lookup, restart recovery, TTL enforcement, and deletion.
 See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
-The proxy's `/v1/chat/completions` validates requests and returns 503 until the
-protection pipeline exists. Detection, restoration, and working proxy endpoints
-are future tasks. Persistent requests now reserve their session through restoration;
+Phase 3 task #1 adds explicit local Stage 1 detection with the pinned spaCy
+English model, an audited Presidio registry, and a numbered-street address
+baseline. See [Stage 1 detection](docs/stage1-detection.md) for supported types
+and coverage limits. The proxy's `/v1/chat/completions` still returns 503 until
+the protection pipeline exists; detection is not wired into forwarding yet. Persistent requests now reserve their session through restoration;
 competing operations on that session return 409, and mapping commits precede sending.
 The proxy scaffold makes no upstream calls and provides no PII protection yet.
 
@@ -55,9 +57,19 @@ source .venv/bin/activate
 
 The dependency set includes FastAPI, Pydantic, Uvicorn, HTTPX, PyYAML, Presidio,
 spaCy, cryptography, and Argon2. Development tools include pytest, pytest-asyncio,
-Hypothesis, Faker, and Ruff. The spaCy `en_core_web_lg` model is a separate artifact;
-it is not installed or loaded by this scaffold. Pin and validate the model when
-Stage 1 is implemented. Stage 2 integrations will be added in their own phase.
+Hypothesis, Faker, and Ruff. The optional `stage1` extra installs the pinned
+`en_core_web_lg` 3.8.0 model; its wheel and SHA-256 are recorded in `uv.lock`.
+Install it before using the detector or running the full test suite:
+
+```sh
+uv sync --locked --extra stage1
+```
+
+To preserve additional packages already installed in your environment, use
+`uv sync --locked --extra stage1 --inexact`. Detection loads the local model
+explicitly and never downloads one at runtime. App construction/startup remains
+independent of the model until the gateway is wired. Stage 2 integrations arrive
+in their own phase.
 
 ## Run the scaffold
 
@@ -232,7 +244,7 @@ uv run --locked ruff format --check .
 uv build
 ```
 
-Run the tests with `uv run --locked pytest`. They cover domain contracts,
+Run the full tests with `uv run --locked --extra stage1 pytest`. They cover domain contracts,
 configuration validation, strict HTTP contracts, safe errors, credential prompts,
 and CLI settings propagation. Use synthetic fixtures and the fake upstream before any
 provider smoke test. Future buffered SSE will wait for the complete upstream

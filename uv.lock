@@ -334,6 +334,14 @@ wheels = [
 ]
 
 [[package]]
+name = "en-core-web-lg"
+version = "3.8.0"
+source = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }
+wheels = [
+    { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl", hash = "sha256:293e9547a655b25499198ab15a525b05b9407a75f10255e405e8c3854329ab63" },
+]
+
+[[package]]
 name = "faker"
 version = "40.40.0"
 source = { registry = "https://pypi.org/simple" }
@@ -659,8 +667,14 @@ dependencies = [
     { name = "presidio-analyzer" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "regex" },
     { name = "spacy" },
     { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+stage1 = [
+    { name = "en-core-web-lg" },
 ]
 
 [package.dev-dependencies]
@@ -676,14 +690,17 @@ dev = [
 requires-dist = [
     { name = "argon2-cffi", specifier = ">=25.1,<26" },
     { name = "cryptography", specifier = ">=46" },
+    { name = "en-core-web-lg", marker = "extra == 'stage1'", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "presidio-analyzer", specifier = ">=2.2,<3" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "pyyaml", specifier = ">=6,<7" },
-    { name = "spacy", specifier = ">=3.8,<4" },
+    { name = "regex", specifier = ">=2025" },
+    { name = "spacy", specifier = ">=3.8,<3.9" },
     { name = "uvicorn", specifier = ">=0.34,<1" },
 ]
+provides-extras = ["stage1"]
 
 [package.metadata.requires-dev]
 dev = [
