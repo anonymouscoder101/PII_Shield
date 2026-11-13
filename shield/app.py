@@ -22,7 +22,7 @@ from shield.errors import (
     require_json,
 )
 from shield.limits import RequestLimitsMiddleware
-from shield.persistent import PersistentSessions, SessionAccessError, VaultStartupError
+from shield.persistent import SessionAccessError, VaultStartupError, VaultStartupHandoff
 from shield.session import ephemeral_session
 from shield.session_access import require_session_access, require_unlocked_vault
 
@@ -37,14 +37,16 @@ def create_app(
     async def lifespan(app: FastAPI):
         service = None
         passphrase = None
+        handoff = VaultStartupHandoff()
         try:
             if app.state.config.sessions.persistent_enabled:
                 passphrase = app.state.credentials.vault_passphrase
                 if passphrase is None:
                     raise VaultStartupError("Vault startup failed.")
-                service = await run_in_threadpool(
-                    PersistentSessions.open, app.state.config.vault, passphrase
+                await run_in_threadpool(
+                    handoff.open, app.state.config.vault, passphrase
                 )
+                service = handoff.take()
                 app.state.vault = service
             passphrase = None
             app.state.credentials = RuntimeCredentials(
@@ -52,6 +54,7 @@ def create_app(
             )
             yield
         finally:
+            handoff.cancel()
             passphrase = None
             if service is not None:
                 service.close()

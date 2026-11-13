@@ -19,6 +19,7 @@ ERRORS: dict[ErrorCode, tuple[int, str]] = {
     ErrorCode.VAULT_LOCKED: (423, "Persistent sessions require an unlocked vault."),
     ErrorCode.SESSION_NOT_FOUND: (404, "Session was not found."),
     ErrorCode.SESSION_EXPIRED: (410, "Session has expired."),
+    ErrorCode.SESSION_BUSY: (409, "Session is in use; retry after the active request."),
     ErrorCode.DETECTION_FAILED: (503, "PII detection is unavailable."),
     ErrorCode.PROTECTION_BLOCKED: (422, "Request was blocked by the protection guard."),
     ErrorCode.REVIEWER_UNAVAILABLE: (503, "Local contextual review is unavailable."),

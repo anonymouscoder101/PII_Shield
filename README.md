@@ -11,7 +11,7 @@ Phase 1 tasks #1–6 are implemented: the package scaffold, shared typed domain
 contracts, validated configuration, strict Chat Completions schemas, safe errors,
 runtime credential loading, request limits, locked-vault checks, and a separate
 fake upstream with synthetic fixtures.
-Phase 2 tasks #1–5 add an opt-in SQLite storage module with a versioned schema,
+Phase 2 tasks #1–6 add an opt-in SQLite storage module with a versioned schema,
 transactional ciphertext inserts, full-digest constraints, Argon2id key derivation,
 an authenticated unlock verifier, and AES-GCM entry
 encryption with authenticated reads. Ephemeral requests receive independent
@@ -20,7 +20,8 @@ creation, lookup, restart recovery, TTL enforcement, and deletion.
 See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
 The proxy's `/v1/chat/completions` validates requests and returns 503 until the
 protection pipeline exists. Detection, restoration, and working proxy endpoints
-are future tasks; active persistent-request coordination is Phase 2 task 6.
+are future tasks. Persistent requests now reserve their session through restoration;
+competing operations on that session return 409, and mapping commits precede sending.
 The proxy scaffold makes no upstream calls and provides no PII protection yet.
 
 ## Setup with uv
@@ -74,7 +75,8 @@ session endpoints return 423 while the vault is locked. Enable
 initialize or unlock the configured vault. `POST /shield/sessions` returns 201
 with reusable session metadata and `X-Shield-Session`; `GET /shield/sessions/{id}`
 returns metadata, and `DELETE /shield/sessions/{id}` returns 204. Unknown IDs return
-404; encountering an expired session removes it and returns 410. The analysis
+404; encountering an expired idle session removes it and returns 410. A busy
+session returns 409; retry after its active request finishes. The analysis
 endpoint is not available yet.
 Stop with Ctrl-C.
 
@@ -236,3 +238,27 @@ and CLI settings propagation. Use synthetic fixtures and the fake upstream befor
 provider smoke test. Future buffered SSE will wait for the complete upstream
 answer, and detector misses must be measured rather than treated as a guarantee
 that all PII is removed.
+
+
+## Persistent request coordination
+
+One service process owns a persistent vault at a time. Startup holds an OS lock
+in `<vault path>.lock`; starting another owner fails before unlocking. The lock
+file contains no secrets, remains on disk, and is released by closing its handle,
+including after a process exit. Keep the configured vault in a private local
+directory and use one server worker.
+
+`PersistentSessions.use(id)` grants an exclusive request scope without waiting.
+Competing calls for that session return `409 session_busy`; other sessions and
+ephemeral requests proceed independently. A request admitted before expiry may
+finish, including restoration. Pruning skips busy sessions; a subsequent idle
+lookup enforces expiry. Shutdown refuses new scopes and releases the vault key
+and ownership only after existing scopes exit.
+
+Within a request scope, add new mappings to `active.mappings` and use
+`await active.send(callback)` for the future gateway send: it commits pending
+mappings before invoking the callback, and never calls it if commit fails. Use
+`active.read_mapping(token)` while the scope is held. Keep the scope open through
+restoration, then exit to release its key and mappings. Standalone service calls
+for that session are competing operations; they cannot reenter an active scope.
+The chat scaffold still makes no upstream calls until Phase 4.

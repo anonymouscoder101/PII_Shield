@@ -23,10 +23,13 @@ PII_Shielding_Proxy_Design_Document_v0.1.docx
 # Vault files, SQLite sidecars, and local logs
 .shield/
 *.db
+*.db.lock
 *.db-*
 *.sqlite
+*.sqlite.lock
 *.sqlite-*
 *.sqlite3
+*.sqlite3.lock
 *.sqlite3-*
 *.log
 logs/

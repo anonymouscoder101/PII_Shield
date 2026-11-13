@@ -48,7 +48,8 @@ def test_creation_restart_recovery_and_scoped_key_release(tmp_path):
             entity_digest=b"d" * 32,
             original_value=SecretStr("Synthetic Person"),
         )
-        service.insert_mappings([mapping])
+        active.mappings[mapping.token] = mapping
+        active.commit_mappings()
     with pytest.raises(RuntimeError, match="closed"):
         _ = active.key
     service.close()

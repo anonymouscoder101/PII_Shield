@@ -147,6 +147,7 @@ All public failures use this envelope with a static message:
 | 404 | `not_found`, `session_not_found` |
 | 405 | `method_not_allowed` (preserves a valid `Allow` header) |
 | 408 | `request_timeout` |
+| 409 | `session_busy` |
 | 410 | `session_expired` |
 | 413 | `request_too_large` |
 | 415 | `unsupported_media_type` |
@@ -210,7 +211,8 @@ values in responses; the vault stores integer Unix seconds. Configured TTL is
 rounded up to whole seconds, with a minimum of one second. Reading or using a
 session does not extend its TTL. All three endpoints return 423 when persistence
 is disabled or the vault is locked. Unknown/deleted IDs return 404. Expiry is
-inclusive; the first lookup of a retained expired row deletes it and returns 410.
+inclusive at admission; an idle lookup of a retained expired row deletes it and
+returns 410. An already admitted request may finish through restoration.
 Startup also prunes expired rows, so an already-pruned ID returns 404. Error
 messages never echo the selected ID. Wrapped-key integrity failures return a
 static 500 and do not treat edited timestamps as trusted expiry instructions.
@@ -218,5 +220,16 @@ static 500 and do not treat edited timestamps as trusted expiry instructions.
 Deletion cascades to mappings in the same transaction. No unwrapped HMAC keys are
 cached across operations; scoped request references are released in `finally`.
 Deletion does not prevent recovery from old database copies or guarantee memory
-erasure. The current scaffold makes no upstream calls; coordinating active
-persistent requests with deletion/expiry is Phase 2 task 6.
+erasure. The current scaffold makes no upstream calls. Active requests exclusively reserve
+their selected session; competing metadata, deletion and chat requests return
+409 `session_busy` immediately. Retry after the active request completes. Busy
+sessions are skipped by expiry pruning, with expiry enforced on the next idle
+access. Other session IDs and ephemeral requests remain independent. Shutdown
+blocks new admissions while existing request scopes finish.
+
+
+Persistent service startup requires exclusive OS ownership of its configured
+vault. A second owner (including another worker process) fails startup. The lock
+file is retained on disk; do not unlink it while any owner could be running.
+This coordinates application services, not arbitrary programs editing SQLite.
+No lock is needed or acquired for default ephemeral requests.

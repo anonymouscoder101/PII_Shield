@@ -1,6 +1,6 @@
 # Persistent vault storage
 
-Phase 2 tasks 1–5 add `shield/vault.py`. It is an internal persistence layer,
+Phase 2 tasks 1–6 add `shield/vault.py`. It is an internal persistence layer,
 opened explicitly with `with VaultStore(path) as store:`. Constructing a store
 or constructing the app does not open SQLite or create vault directories.
 Startup without persistence enabled also creates no vault artifacts. Default
@@ -38,8 +38,9 @@ silently replacing the first observed mapping. Any exception, including cancella
 or an interrupted iterable, rolls back the transaction. `transaction()` is an
 internal escape hatch for later vault services. It uses `BEGIN IMMEDIATE`, cannot
 be nested, and must contain no awaits or network operations. The store is
-synchronous and confined to its opening thread; active-request coordination,
-TTL enforcement, and atomic collision selection are later tasks.
+synchronous and confined to its opening thread. The persistent service supplies
+request coordination and TTL enforcement; atomic token collision selection is a
+later pseudonym task.
 
 ## Authenticated entry identity
 
@@ -147,7 +148,7 @@ Production tests exercise restart reads and plaintext absence from database,
 rollback-journal and WAL/SHM files, plus nonce, ciphertext, digest, identity and
 cross-session row swaps. Metadata such as tokens and full keyed digests remains
 visible by design. Session endpoints require the authenticated service described
-below. Active-request coordination is task 6.
+below, including exclusive request leases.
 
 
 ## HMAC session keys
@@ -216,8 +217,74 @@ no background cleanup scheduler. Already-pruned/deleted IDs are unknown; no
 replacement session is silently created.
 
 The service has no long-lived SQLite connection or HMAC cache. Scoped references
-are dropped when a scope exits; this does not erase caller copies or revoke an
-already active scope. Coordination of active requests, expiry and deletion
-across multiple operations is task 6, required before upstream proxy work uses
-persistent mappings. Deleting active rows still does not destroy old database
-copies or guarantee erasure from freed process memory.
+are dropped when a scope exits. Active requests now use the coordination policy
+below. Deleting rows still does not destroy old database copies or guarantee
+erasure from freed process memory.
+
+## Concurrency and committed mappings
+
+Each persistent request takes an exclusive lease in `use(id)`. A registry protected
+by a short thread lock reserves IDs across async tasks and threads. It never
+waits on another request: competing `use`, metadata lookup, deletion, or standalone
+mapping operations fail with `session_busy` (HTTP 409). Different IDs can remain
+active concurrently; SQLite write transactions remain short and serialized by
+SQLite itself. Never call standalone service methods for the leased ID from
+inside its scope; use the scope's methods instead.
+
+Admission authenticates stored lifetime metadata and checks expiry. Once admitted,
+a scope pins that lifetime through send and restoration, even if the wall clock
+crosses the expiry timestamp. Pruning skips busy sessions. After the scope exits,
+an idle lookup/prune deletes an expired row and its entries transactionally.
+This avoids deleting mappings needed to restore an already admitted answer.
+No TTL extension is written to disk. A client encountering 409 retries later;
+there is no automatic network retry or unbounded lock wait.
+
+New mappings are staged in `active.mappings` under their token. The scope checks
+that every staged mapping belongs to its session and that dictionary keys match
+tokens. `commit_mappings()` encrypts and commits the entire batch, then clears
+pending references only on success. A failed batch remains pending and sends
+nothing. `await active.send(callback)` commits first and invokes the callback
+only after a successful database commit. The request keeps its lease until the
+surrounding `use` scope exits, including restoration after the callback returns.
+A send failure does not roll back mappings already committed: an upstream may
+have received the sanitized request. Keys, pending values and the lease are
+released in `finally` on failure, timeout or cancellation. Committed rows survive
+for the session's normal TTL/deletion policy. The production gateway must use
+this send path when implemented; the current scaffold makes no provider calls.
+
+`active.read_mapping(token)` reads authenticated committed mappings without
+rechecking expiry mid-request. Standalone service mapping reads/writes reserve
+the session across validation and storage. Multi-session insert batches reserve
+all affected IDs before validating and committing the batch. Closing the service
+marks it unavailable to new operations, lets existing scopes finish, and drops
+the vault key and ownership after the last scope releases. No request state or
+HMAC key is shared between ephemeral requests; they acquire no vault lease.
+
+## Exclusive vault ownership
+
+Per-service leases require one service owner per database. `vault_owner.py` holds
+an exclusive nonblocking OS file lock on `<vault path>.lock` from startup through
+final shutdown drain. A second service instance or worker fails startup rather
+than obtaining an independent lease registry. POSIX uses `flock`; Windows uses a
+one-byte lock. Unsupported locking platforms fail closed. The POSIX path is
+covered by this environment's tests; the Windows branch requires Windows runtime
+validation. The lock file is created with mode `0600` (where supported), using
+no-follow flags and regular-file checks. New parent directories use `0700`.
+No secrets or process identifiers are written into it (Windows may store a
+single zero byte for the byte lock). Existing directory permissions are preserved.
+
+Never unlink a live lock file: its inode must remain stable so competing openers
+observe the same OS lock. The harmless file remains after shutdown and crashes;
+the kernel releases ownership when the handle/process closes. These are advisory
+locks for cooperative application services on a local filesystem; they do not
+prevent trusted maintenance code using raw `VaultStore`/SQLite, filesystem path
+replacement, or a hostile program ignoring the lock. Use a private local vault
+directory and one server worker; network filesystem lock behavior is unsupported.
+
+
+Startup interruption closes any acquired ownership before propagating the
+interruption. Lifespan also uses a synchronized worker-result handoff: if startup
+is cancelled while KDF/unlock runs, the worker closes its completed service
+instead of publishing it to an abandoned caller. The KDF itself cannot be forcibly
+interrupted; ownership is released when that work finishes. This cleanup does
+not depend on the cancelled event loop receiving a thread result.

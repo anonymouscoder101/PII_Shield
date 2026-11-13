@@ -58,3 +58,11 @@ scoped-key release, inclusive TTL and cascade cleanup, corruption and wrong-key
 startup failures, opt-in lifespan behavior, metadata and deletion endpoints,
 unknown/expired selections, failure/cancellation cleanup, and real async timeout
 cleanup for ephemeral state. ASGI lifespan is explicitly entered in startup tests.
+
+
+`test_session_concurrency.py` uses events, real threads and a child process to
+check exclusive leases, HTTP busy responses, distinct-session progress, expiry
+pinning, shutdown drain and vault ownership. Send callbacks verify committed
+rows through an independent SQLite connection. Failed commits never invoke the
+callback; timeout/cancellation release keys and leases. Concurrent ephemeral
+contexts retain independent mappings and keys.

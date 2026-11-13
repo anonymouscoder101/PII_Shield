@@ -177,6 +177,7 @@ class ErrorCode(StrEnum):
     VAULT_LOCKED = "vault_locked"
     SESSION_NOT_FOUND = "session_not_found"
     SESSION_EXPIRED = "session_expired"
+    SESSION_BUSY = "session_busy"
     DETECTION_FAILED = "detection_failed"
     PROTECTION_BLOCKED = "protection_blocked"
     REVIEWER_UNAVAILABLE = "reviewer_unavailable"
