@@ -1,6 +1,6 @@
 # Persistent vault storage
 
-Phase 2 tasks 1–2 add `shield/vault.py`. It is an internal persistence layer,
+Phase 2 tasks 1–3 add `shield/vault.py`. It is an internal persistence layer,
 opened explicitly with `with VaultStore(path) as store:`. Constructing a store
 or starting the proxy does not open SQLite or create vault directories. Default
 ephemeral requests continue to bypass the vault; the app's persistent session
@@ -51,9 +51,10 @@ TTL enforcement, and atomic collision selection are later tasks.
 JSON escaping and explicit array elements make field boundaries unambiguous.
 The digest is all 32 bytes rendered as lowercase hex. This encoding binds the
 domain, schema version, session, token, type, and full digest when used by AES-GCM.
-Task 3 will use it for production encryption and authenticated reads. This storage
-layer accepts already-encrypted rows; it cannot prove supplied bytes are ciphertext
-or authenticate them by itself. It accepts no original-value or raw-key argument.
+`encrypt_entry` and `decrypt_entry` use this encoding for production AES-GCM
+encryption and authenticated reads. Raw `insert_entries` accepts already-encrypted
+rows and cannot verify supplied bytes without a key. Prefer `insert_mappings`
+and `read_mapping` for value storage and restoration.
 The unlock verifier uses a separate domain; task 4 supplies wrapped-key AAD.
 
 ## Disk behavior and limitations
@@ -109,7 +110,7 @@ extract its 32 bytes. The store does not cache the key or set an unlocked flag.
 The passphrase and key are never persisted or logged. The caller owns key
 lifetime; secret wrappers mask representations but do not securely erase memory.
 The current CLI still only collects credentials. Startup unlock, persistent API
-sessions, entry encryption and wrapped HMAC keys are subsequent Phase 2 tasks.
+sessions and wrapped HMAC keys are subsequent Phase 2 tasks.
 
 Stored KDF metadata is untrusted. Before allocation, parameter JSON is limited
 to 1024 characters, extra/missing fields and unsupported algorithms/versions/key
@@ -119,3 +120,31 @@ local resource limits, applied on creation and unlock; higher settings require
 an explicit code/policy change. Existing lower-cost explicit configurations are
 supported, but the documented defaults are recommended. Unlock is synchronous
 and must not run on a request event loop; later startup integration will manage it.
+
+
+## Persistent entry encryption and reads
+
+`encrypt_entry(mapping, key)` UTF-8 encodes the exact original spelling and
+returns an `EntryRow` encrypted with AES-256-GCM. Every call draws a fresh 12-byte
+nonce from `os.urandom`; nonces are not derived from tokens, digests or counters.
+Only 32-byte keys are accepted. `decrypt_entry(row, key)` authenticates ciphertext,
+nonce and the complete entry AAD before decoding a value into a masked
+`TokenMapping`. Any authentication or decoding failure raises the static
+`VaultEntryError`, without returning a partial value or logging row contents.
+
+`insert_mappings(mappings, key)` encrypts before binding anything to SQLite and
+commits the batch atomically. Encryption, nonce-generation, iteration or identity
+conflict failures roll back all rows in the batch. Conflicts never overwrite the
+first spelling; later pseudonym logic will resolve reuse/collisions by full digest.
+`read_mapping(session_id, token, key)` selects only that session/token and validates
+and authenticates its stored identity. Missing rows return `None`; corrupt rows
+raise an authentication error. It never falls back to another session or mapping.
+These methods accept a trusted caller's authenticated vault key and retain no key
+cache. Low-level entry encryption alone is not vault unlock or session authorization.
+
+Production tests exercise restart reads and plaintext absence from database,
+rollback-journal and WAL/SHM files, plus nonce, ciphertext, digest, identity and
+cross-session row swaps. Metadata such as tokens and full keyed digests remains
+visible by design. The unchanged session endpoints remain locked until the
+session service is implemented. Fresh per-request keys and persistent key wrapping
+are task 4; session lifetime and request concurrency are tasks 5 and 6.

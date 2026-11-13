@@ -1,9 +1,8 @@
 """Opt-in SQLite storage for encrypted persistent-session rows.
 
-This layer accepts ciphertext, never TokenMapping/original values or raw keys.
-Explicit initialization/unlock derives keys; entry encryption and session lifetimes
-are handled by later services. Those
-services must authenticate stored rows with ``entry_aad`` before using values.
+Explicit initialization/unlock derives keys. Mapping inserts encrypt original
+values before SQL binding; mapping reads authenticate ciphertext before returning
+values. Session lifetimes and API access are handled by later services.
 Constructing a store does no I/O; only explicitly entering it opens the database.
 """
 
@@ -16,10 +15,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Self
 
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import Field, SecretBytes, SecretStr, model_validator
 
 from shield.config import Argon2Config
-from shield.contracts import Contract, EntityType, NonEmptyString
+from shield.contracts import Contract, EntityType, NonEmptyString, TokenMapping
 from shield.vault_crypto import (
     VaultInitializationError,
     VaultUnlockError,
@@ -65,7 +66,9 @@ class EntryRow(Contract):
     ciphertext: Ciphertext
 
 
-def entry_aad(row: EntryRow, *, schema_version: int = SCHEMA_VERSION) -> bytes:
+def entry_aad(
+    row: EntryRow | TokenMapping, *, schema_version: int = SCHEMA_VERSION
+) -> bytes:
     """Canonical UTF-8 JSON array; boundaries cannot collide on embedded delimiters.
 
     The domain and version are part of the authenticated bytes. Hex encodes all
@@ -84,6 +87,58 @@ def entry_aad(row: EntryRow, *, schema_version: int = SCHEMA_VERSION) -> bytes:
         ensure_ascii=True,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+class VaultEntryError(ValueError):
+    """Static entry failure without values, keys, digests or crypto exceptions."""
+
+
+def _entry_cipher(key: SecretBytes) -> AESGCM:
+    raw = key.get_secret_value()
+    if len(raw) != 32:
+        raise ValueError("vault key must have 32 bytes")
+    return AESGCM(raw)
+
+
+def encrypt_entry(mapping: TokenMapping, key: SecretBytes) -> EntryRow:
+    """Encrypt the exact first spelling with a fresh random 96-bit nonce.
+
+    The full identity is authenticated, but remains plaintext lookup metadata.
+    This function performs no I/O and retains neither key nor original value.
+    """
+    try:
+        cipher = _entry_cipher(key)
+        nonce = os.urandom(12)
+        ciphertext = cipher.encrypt(
+            nonce,
+            mapping.original_value.get_secret_value().encode("utf-8"),
+            entry_aad(mapping),
+        )
+        return EntryRow(
+            session_id=mapping.session_id,
+            token=mapping.token,
+            entity_type=mapping.entity_type,
+            entity_digest=mapping.entity_digest,
+            nonce=nonce,
+            ciphertext=ciphertext,
+        )
+    except ValueError, OSError:
+        raise VaultEntryError("Vault entry encryption failed.") from None
+
+
+def decrypt_entry(row: EntryRow, key: SecretBytes) -> TokenMapping:
+    """Release a value only after AES-GCM authenticates its entire row identity."""
+    try:
+        value = _entry_cipher(key).decrypt(row.nonce, row.ciphertext, entry_aad(row))
+        return TokenMapping(
+            session_id=row.session_id,
+            token=row.token,
+            entity_type=row.entity_type,
+            entity_digest=row.entity_digest,
+            original_value=SecretStr(value.decode("utf-8")),
+        )
+    except ValueError, InvalidTag:
+        raise VaultEntryError("Vault entry authentication failed.") from None
 
 
 class VaultSchemaError(RuntimeError):
@@ -313,3 +368,45 @@ class VaultStore:
                 raise VaultUnlockError("Vault unlock failed.")
             key = unlock_header(row, passphrase, SCHEMA_VERSION)
         return key
+
+    def insert_mappings(
+        self, mappings: Iterable[TokenMapping], key: SecretBytes
+    ) -> None:
+        """Encrypt and commit a complete batch; no plaintext is bound to SQLite.
+
+        The caller supplies an authenticated vault key and owns session access.
+        Any encryption, iteration or insert failure rolls back the whole batch.
+        """
+        self.insert_entries(encrypt_entry(mapping, key) for mapping in mappings)
+
+    def read_mapping(
+        self, session_id: str, token: str, key: SecretBytes
+    ) -> TokenMapping | None:
+        """Read only the requested session/token, authenticating before returning.
+
+        A missing mapping is None; a corrupt row raises a static error. This
+        low-level operation does not enforce session expiry or API readiness.
+        """
+        with self.transaction() as db:
+            values = db.execute(
+                "SELECT session_id, token, entity_type, entity_digest, "
+                "nonce, ciphertext "
+                "FROM entries WHERE session_id = ? AND token = ?",
+                (session_id, token),
+            ).fetchone()
+            if values is None:
+                return None
+            try:
+                sid, stored_token, entity_type, digest, nonce, ciphertext = values
+                row = EntryRow(
+                    session_id=sid,
+                    token=stored_token,
+                    entity_type=EntityType(entity_type),
+                    entity_digest=digest,
+                    nonce=nonce,
+                    ciphertext=ciphertext,
+                )
+            except ValueError:
+                raise VaultEntryError("Vault entry authentication failed.") from None
+            result = decrypt_entry(row, key)
+        return result
