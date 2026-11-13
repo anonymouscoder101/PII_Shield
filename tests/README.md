@@ -26,3 +26,10 @@ persistent selection and creation, while ephemeral requests ignore vault readine
 Run `uv run --locked pytest`. All fixtures must use synthetic values. The
 detailed verification strategy is in
 `IMPLEMENTATION_PLAN.md`.
+
+`test_vault.py` checks schema creation/reopening and incompatible-schema refusal,
+foreign keys and cascading deletes, digest/token uniqueness, transaction rollback
+on conflicts and cancellation, restrictive database/journal permissions, and
+full-identity AAD with synthetic AES-GCM ciphertext. The storage round-trip test
+checks that its seeded plaintext is absent from database and journal bytes;
+production encryption and unlock remain later Phase 2 tasks.

@@ -11,8 +11,11 @@ Phase 1 tasks #1–6 are implemented: the package scaffold, shared typed domain
 contracts, validated configuration, strict Chat Completions schemas, safe errors,
 runtime credential loading, request limits, locked-vault checks, and a separate
 fake upstream with synthetic fixtures.
+Phase 2 task #1 adds an opt-in SQLite storage module with a versioned schema,
+transactional ciphertext inserts, full-digest constraints, and entry AAD encoding.
+See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
 The proxy's `/v1/chat/completions` validates requests and returns 503 until the
-protection pipeline exists. Detection, vault, restoration, and working proxy
+protection pipeline exists. Detection, vault encryption/unlock, restoration, and working proxy
 endpoints are future tasks. The proxy scaffold makes no
 upstream calls and provides no PII protection yet.
 
