@@ -1,10 +1,11 @@
 # Persistent vault storage
 
-Phase 2 tasks 1–4 add `shield/vault.py`. It is an internal persistence layer,
+Phase 2 tasks 1–5 add `shield/vault.py`. It is an internal persistence layer,
 opened explicitly with `with VaultStore(path) as store:`. Constructing a store
-or starting the proxy does not open SQLite or create vault directories. Default
-ephemeral requests continue to bypass the vault; the app's persistent session
-routes remain locked until the session service and its authenticated startup flow are wired.
+or constructing the app does not open SQLite or create vault directories.
+Startup without persistence enabled also creates no vault artifacts. Default
+ephemeral requests continue to bypass the vault. Persistent routes require opt-in
+and authenticated startup unlock.
 
 ## Schema version 1
 
@@ -109,8 +110,8 @@ Both methods return `SecretBytes`; trusted encryption code must explicitly
 extract its 32 bytes. The store does not cache the key or set an unlocked flag.
 The passphrase and key are never persisted or logged. The caller owns key
 lifetime; secret wrappers mask representations but do not securely erase memory.
-The current CLI still only collects credentials. Startup unlock, persistent API
-sessions are subsequent Phase 2 tasks.
+The CLI collects credentials locally; opt-in application lifespan authenticates
+the vault before serving. The application then drops its passphrase reference.
 
 Stored KDF metadata is untrusted. Before allocation, parameter JSON is limited
 to 1024 characters, extra/missing fields and unsupported algorithms/versions/key
@@ -145,9 +146,8 @@ cache. Low-level entry encryption alone is not vault unlock or session authoriza
 Production tests exercise restart reads and plaintext absence from database,
 rollback-journal and WAL/SHM files, plus nonce, ciphertext, digest, identity and
 cross-session row swaps. Metadata such as tokens and full keyed digests remains
-visible by design. The unchanged session endpoints remain locked until the
-session service is implemented. Session lifetime and request concurrency are
-tasks 5 and 6.
+visible by design. Session endpoints require the authenticated service described
+below. Active-request coordination is task 6.
 
 
 ## HMAC session keys
@@ -180,10 +180,44 @@ Binding the lifetime also makes stored timestamp edits fail authentication.
 `unwrap_session_key(row, vault_key)` authenticates before returning a masked
 32-byte key. Wrong keys, changed identity/timestamps/nonces/ciphertexts and domain
 or schema substitutions raise static `VaultSessionKeyError` failures. Helpers
-neither cache unwrapped keys nor bypass session authorization. Checking whether a
-session is expired, managing deletion, and wiring the reusable-session endpoints
-remain task 5 work.
+neither cache unwrapped keys nor bypass session authorization. The lifecycle service checks expiry and manages deletion and the reusable-session
+endpoints.
 
 Request cleanup releases owned references rather than erasing memory; callers
 must not retain or log extracted keys or mappings. Persistent ciphertexts remain
 recoverable from old copies using the vault passphrase, as documented above.
+
+
+## Persistent lifecycle
+
+`shield/persistent.py` owns the authenticated vault key while enabled. Its
+`PersistentSessions.open(...)` authenticates stored metadata, initializes only
+an empty vault, and prunes expired sessions at startup. A missing header in a
+nonempty vault is an error, never permission to reset its key. Application
+lifespan runs initialization/KDF in a worker and closes the service on shutdown.
+Constructing the app alone does not open SQLite; embedded callers must run ASGI
+lifespan to enable persistence.
+
+Creating a session generates an independent HMAC key and random UUID, wraps the
+key, and inserts its metadata. The service stores no unwrapped HMAC-key cache.
+Each scoped `use(id)` authenticates/unwraps the row and releases its key and
+request mappings in `finally`, including failure or cancellation. Lifecycle
+lookup returns metadata without retaining the key. Internal mapping operations
+check session validity before calling encrypted storage methods.
+
+Session lifetimes are fixed at creation; lookups do not refresh them. Creation
+uses whole-second UTC timestamps, with configured TTL rounded up to at least one
+second. Expiry is inclusive. Lookup authenticates lifetime metadata before
+checking expiry, then deletes an expired session and its entries in one
+transaction. It raises the expiry error after commit so cleanup is retained.
+Explicit deletion uses the same cascade transaction. Cleanup is lazy on access
+and also runs at startup; `prune_expired()` can be invoked explicitly. There is
+no background cleanup scheduler. Already-pruned/deleted IDs are unknown; no
+replacement session is silently created.
+
+The service has no long-lived SQLite connection or HMAC cache. Scoped references
+are dropped when a scope exits; this does not erase caller copies or revoke an
+already active scope. Coordination of active requests, expiry and deletion
+across multiple operations is task 6, required before upstream proxy work uses
+persistent mappings. Deleting active rows still does not destroy old database
+copies or guarantee erasure from freed process memory.

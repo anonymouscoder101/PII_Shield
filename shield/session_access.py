@@ -1,4 +1,4 @@
-"""Foundation checks; persistent storage and session lookup arrive in Phase 2."""
+"""Session selection checks; authenticated lookup follows in the route service."""
 
 from typing import Protocol
 

@@ -11,15 +11,17 @@ Phase 1 tasks #1–6 are implemented: the package scaffold, shared typed domain
 contracts, validated configuration, strict Chat Completions schemas, safe errors,
 runtime credential loading, request limits, locked-vault checks, and a separate
 fake upstream with synthetic fixtures.
-Phase 2 tasks #1–4 add an opt-in SQLite storage module with a versioned schema,
-transactional ciphertext inserts, full-digest constraints, Argon2id key derivation, an authenticated unlock verifier, and AES-GCM entry
+Phase 2 tasks #1–5 add an opt-in SQLite storage module with a versioned schema,
+transactional ciphertext inserts, full-digest constraints, Argon2id key derivation,
+an authenticated unlock verifier, and AES-GCM entry
 encryption with authenticated reads. Ephemeral requests receive independent
-memory-only HMAC keys; explicit persistent keys can be wrapped for disk storage.
+memory-only HMAC keys. Optional persistent sessions support startup unlock,
+creation, lookup, restart recovery, TTL enforcement, and deletion.
 See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
 The proxy's `/v1/chat/completions` validates requests and returns 503 until the
-protection pipeline exists. Detection, session lifecycle/startup unlock, restoration, and working proxy
-endpoints are future tasks. The proxy scaffold makes no
-upstream calls and provides no PII protection yet.
+protection pipeline exists. Detection, restoration, and working proxy endpoints
+are future tasks; active persistent-request coordination is Phase 2 task 6.
+The proxy scaffold makes no upstream calls and provides no PII protection yet.
 
 ## Setup with uv
 
@@ -66,9 +68,14 @@ uv run --locked python -m shield
 
 The server binds to `127.0.0.1:8000`. Open `http://127.0.0.1:8000/docs` to inspect
 the supported request schema. `/v1/chat/completions` rejects unsupported payloads
-with 400 and returns 503 for valid ephemeral requests. Persistent requests and
-`POST /shield/sessions` return 423 while the vault is locked. Other `/shield/*`
-endpoints are not available yet.
+with 400 and returns 503 for valid ephemeral requests. Requests selecting persistent sessions and all
+session endpoints return 423 while the vault is locked. Enable
+`sessions.persistent_enabled: true` to collect a non-echoed startup passphrase and
+initialize or unlock the configured vault. `POST /shield/sessions` returns 201
+with reusable session metadata and `X-Shield-Session`; `GET /shield/sessions/{id}`
+returns metadata, and `DELETE /shield/sessions/{id}` returns 204. Unknown IDs return
+404; encountering an expired session removes it and returns 410. The analysis
+endpoint is not available yet.
 Stop with Ctrl-C.
 
 ## Run the fake upstream
@@ -132,15 +139,15 @@ validated but no reviewer is loaded yet.
 Vault paths expand `~`; relative paths resolve beside the YAML file. The loader
 creates no files or directories and does not open or unlock a vault. Session TTL
 is a positive finite number of hours, defaulting to 24. Default sessions must be
-ephemeral; reusable sessions will require explicit creation. Argon2 parameters
+ephemeral; reusable sessions require explicit creation. Argon2 parameters
 default to 65536 KiB, 3 iterations, and parallelism 4. Loading requires positive
 iteration/parallelism values and memory of at least eight times parallelism.
 
 The CLI passes settings and runtime credentials to `create_app(config, credentials)`.
 Settings are available as `app.state.config`. Importing `shield.app:app` directly
 uses built-in settings without reading YAML or credentials; use the CLI to load
-them. Settings for detection, HTTP timeouts, and persistence will be consumed by
-their implementations in later tasks.
+them. Opt-in ASGI lifespan uses the configured persistence settings; detection
+and upstream HTTP timeouts are consumed by their later implementations.
 
 The proxy enforces `server.max_request_bytes` (default **1048576 bytes**, 1 MiB)
 before JSON parsing, and `server.request_timeout_s` (default **120 seconds**) from
@@ -153,17 +160,17 @@ The timeout cooperatively cancels async work and runs its cleanup; synchronous
 work cannot be forcibly interrupted, and late headers are rejected when it returns.
 
 Selecting `X-Shield-Session` requires an enabled, authenticated unlocked vault.
-The foundation initializes the vault as unavailable, so a passphrase collected at
-startup still leaves persistent requests locked. `POST /shield/sessions` accepts
-an empty object or no body and returns 423. Default requests without that header
-never consult vault readiness. Real unlock, lookup, expiry, and persistent session
-creation remain Phase 2 work.
+Without authenticated startup, persistent routes return 423. Default requests
+without that header never consult vault readiness. With persistence enabled,
+startup initializes or unlocks the vault; creation and lookup expose session
+metadata while unknown, expired or deleted IDs fail without replacement.
 
 The CLI reads provider credentials from the environment variable named by
 `api_key_env`; a missing key is allowed for this scaffold. Setting
 `sessions.persistent_enabled: true` collects a passphrase through a non-echoing
-startup prompt and fails if echo cannot be disabled. Vault unlock and persistent
-sessions remain Phase 2 work. Default ephemeral operation never prompts. The example
+startup prompt and fails if echo cannot be disabled. Lifespan authenticates the
+vault before serving and releases the startup passphrase reference. Default
+ephemeral operation never prompts. The example
 contains no secrets; local `shield.yaml`, `.env` files, vaults and SQLite sidecars,
 logs, generated datasets, and evaluation results are ignored by Git.
 

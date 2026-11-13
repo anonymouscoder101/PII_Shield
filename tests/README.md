@@ -51,3 +51,10 @@ restart recovery and plaintext absence from database/journal/WAL/SHM artifacts.
 cleanup on failure/cancellation, real chat request integration without SQLite,
 persistent-only key wrapping, fresh nonces, 32-byte key requirements, full wrapped
 key AAD binding, restart recovery and absence of raw key bytes from disk.
+
+
+`test_persistent_sessions.py` checks lifecycle creation and restart recovery,
+scoped-key release, inclusive TTL and cascade cleanup, corruption and wrong-key
+startup failures, opt-in lifespan behavior, metadata and deletion endpoints,
+unknown/expired selections, failure/cancellation cleanup, and real async timeout
+cleanup for ephemeral state. ASGI lifespan is explicitly entered in startup tests.

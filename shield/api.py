@@ -6,7 +6,7 @@ detection, substitution, mapping registration, and the final guard are implement
 
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from shield.contracts import Contract, Count, NonEmptyString
 
@@ -145,3 +145,11 @@ class ChatCompletionChunk(Contract):
         if len(indices) != len(set(indices)):
             raise ValueError("choice indices must be unique")
         return self
+
+
+class SessionResponse(Contract):
+    """Public reusable-session metadata, without keys or mapping values."""
+
+    session_id: NonEmptyString
+    created_at: AwareDatetime
+    expires_at: AwareDatetime

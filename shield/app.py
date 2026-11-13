@@ -1,18 +1,28 @@
 """ASGI scaffold. Protection and proxy endpoints are not implemented yet."""
 
-from fastapi import Depends, FastAPI, Request
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, Request, Response
+from starlette.concurrency import run_in_threadpool
 
 from shield import __version__
 from shield.api import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     SessionCreateRequest,
+    SessionResponse,
 )
 from shield.config import ShieldConfig
 from shield.contracts import APIError, ErrorCode
 from shield.credentials import RuntimeCredentials
-from shield.errors import ShieldError, install_error_handlers, require_json
+from shield.errors import (
+    ShieldError,
+    error_response,
+    install_error_handlers,
+    require_json,
+)
 from shield.limits import RequestLimitsMiddleware
+from shield.persistent import PersistentSessions, SessionAccessError, VaultStartupError
 from shield.session import ephemeral_session
 from shield.session_access import require_session_access, require_unlocked_vault
 
@@ -21,20 +31,54 @@ def create_app(
     config: ShieldConfig | None = None,
     credentials: RuntimeCredentials | None = None,
 ) -> FastAPI:
-    """Retain validated settings for future protection components."""
+    """Create routes without I/O; opt-in vault authentication runs during lifespan."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        service = None
+        passphrase = None
+        try:
+            if app.state.config.sessions.persistent_enabled:
+                passphrase = app.state.credentials.vault_passphrase
+                if passphrase is None:
+                    raise VaultStartupError("Vault startup failed.")
+                service = await run_in_threadpool(
+                    PersistentSessions.open, app.state.config.vault, passphrase
+                )
+                app.state.vault = service
+            passphrase = None
+            app.state.credentials = RuntimeCredentials(
+                api_key=app.state.credentials.api_key
+            )
+            yield
+        finally:
+            passphrase = None
+            if service is not None:
+                service.close()
+            app.state.vault = None
+            app.state.credentials = RuntimeCredentials(
+                api_key=app.state.credentials.api_key
+            )
+
     app = FastAPI(
         title="PII Shield",
         description=(
             "Foundation scaffold. PII protection endpoints are not available yet."
         ),
         version=__version__,
+        lifespan=lifespan,
     )
     app.state.config = config if config is not None else ShieldConfig()
     app.state.credentials = (
         credentials if credentials is not None else RuntimeCredentials()
     )
-    app.state.vault = None  # No authenticated vault implementation exists in Phase 1.
+    app.state.vault = None  # Authenticated service is installed only during lifespan.
     install_error_handlers(app)
+
+    @app.exception_handler(SessionAccessError)
+    async def session_error(request: Request, exc: SessionAccessError):
+        return error_response(exc.code)
+
     app.add_middleware(RequestLimitsMiddleware, config=app.state.config.server)
 
     @app.post(
@@ -82,27 +126,53 @@ def create_app(
         if "x-shield-session" not in request.headers:
             with ephemeral_session():
                 raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
-        raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
+        with request.app.state.vault.use(request.headers["x-shield-session"]):
+            raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
 
     @app.post(
         "/shield/sessions",
-        responses={
-            "4XX": {"model": APIError, "description": "Invalid session request."},
-            423: {"model": APIError, "description": "Persistent vault is locked."},
-            503: {
-                "model": APIError,
-                "description": "Session storage is not implemented.",
-            },
-        },
-        description=(
-            "Locked foundation stub; reusable session creation arrives in Phase 2."
-        ),
+        response_model=SessionResponse,
+        status_code=201,
+        responses={"4XX": {"model": APIError}},
     )
     async def create_session(
-        request: Request, body: SessionCreateRequest | None = None
-    ) -> None:
+        request: Request, response: Response, body: SessionCreateRequest | None = None
+    ) -> SessionResponse:
         require_unlocked_vault(request)
-        raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
+        record = request.app.state.vault.create()
+        response.headers["X-Shield-Session"] = record.session_id
+        return SessionResponse(
+            session_id=record.session_id,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+        )
+
+    @app.get(
+        "/shield/sessions/{session_id}",
+        response_model=SessionResponse,
+        responses={"4XX": {"model": APIError}},
+    )
+    async def get_session(
+        session_id: str, request: Request, response: Response
+    ) -> SessionResponse:
+        require_unlocked_vault(request)
+        record = request.app.state.vault.lookup(session_id)
+        response.headers["X-Shield-Session"] = record.session_id
+        return SessionResponse(
+            session_id=record.session_id,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+        )
+
+    @app.delete(
+        "/shield/sessions/{session_id}",
+        status_code=204,
+        responses={"4XX": {"model": APIError}},
+    )
+    async def delete_session(session_id: str, request: Request) -> Response:
+        require_unlocked_vault(request)
+        request.app.state.vault.delete(session_id)
+        return Response(status_code=204)
 
     return app
 

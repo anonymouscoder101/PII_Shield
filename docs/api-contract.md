@@ -13,11 +13,10 @@ false, or empty containers. JSON booleans cannot be replaced with strings/intege
 parameters such as `charset=utf-8`). It validates the request and returns **503**
 `protection_unavailable` for a valid ephemeral payload. Selecting a persistent
 session while the vault is locked returns **423** `vault_locked`.
-`POST /shield/sessions` is a locked creation stub accepting an empty object or no
-body; it also returns 423. It rejects extra body fields, including credentials.
+`POST /shield/sessions` accepts an empty object or no body, rejects extra fields
+including credentials, and creates a reusable session only when the vault is unlocked.
 The scaffold makes no upstream calls. Detection, protection, restoration, actual
-buffered SSE delivery, and working session endpoints are implemented in later
-phases. `/docs` and `/openapi.json` expose the contract.
+and buffered SSE delivery are implemented in later phases. `/docs` and `/openapi.json` expose the contract.
 
 ```json
 {
@@ -52,9 +51,12 @@ No `X-Shield-Session` header selects ephemeral operation, with no vault readines
 lookup. A supplied header must be nonblank and occur exactly once; invalid header
 forms return 400. Valid persistent selections require both
 `sessions.persistent_enabled: true` and a vault service reporting an authenticated
-unlock. All foundation vaults start unavailable, so persistent requests return 423
-even if startup collected a passphrase. Unknown/expired session lookup and reusable
-session creation remain Phase 2 work. No session ID is returned by the foundation.
+unlock. Startup lifespan authenticates the vault when persistence is enabled.
+A supplied unknown ID returns 404; an expired ID is deleted and returns 410 on
+that access. Once cleanup removes an ID, later lookups return 404. Supplied IDs
+never silently fall back to ephemeral sessions. A valid selected session reaches
+the current 503 protection scaffold. Session headers are returned on successful
+creation/metadata responses; error responses expose no session header.
 
 ## Request fields
 
@@ -157,8 +159,7 @@ All public failures use this envelope with a static message:
 
 Validation, request limits, framework errors, locked-vault selection, and the
 unavailable pipeline are exercised by the current chat route. Other codes define
-behavior for their later components; session lookup and upstream timeouts remain
-future work.
+behavior for their later components; upstream timeouts remain future work.
 Handlers never return validation inputs, field paths supplied by the caller,
 provider bodies, exception strings, or credentials. Unexpected HTTP exceptions
 produce a fixed log event without traceback text. If an unexpected error occurs
@@ -186,3 +187,36 @@ The persistent-session setting currently collects a passphrase only. Vault key
 derivation, unlock verification, persistent session creation, and session lifecycle
 remain Phase 2 work. Default request sessions remain ephemeral even when persistent
 session support is enabled.
+
+
+## Reusable session endpoints
+
+With `sessions.persistent_enabled: true`, startup prompts locally for a passphrase
+and initializes a genuinely empty vault or authenticates its existing unlock
+verifier. Startup aborts on wrong/missing credentials or corrupt metadata; a
+failed unlock never resets a vault. KDF/unlock work runs off the event loop.
+Default startup with persistence disabled creates no vault files. Credentials
+never arrive in HTTP requests, and the application releases its passphrase
+reference after startup authentication or failure.
+
+| Method and path | Success | Returned metadata |
+| --- | --- | --- |
+| `POST /shield/sessions` | 201 | `session_id`, `created_at`, `expires_at` |
+| `GET /shield/sessions/{session_id}` | 200 | Same fields |
+| `DELETE /shield/sessions/{session_id}` | 204, empty body | None |
+
+Creation and metadata reads return `X-Shield-Session`. Timestamps are UTC ISO 8601
+values in responses; the vault stores integer Unix seconds. Configured TTL is
+rounded up to whole seconds, with a minimum of one second. Reading or using a
+session does not extend its TTL. All three endpoints return 423 when persistence
+is disabled or the vault is locked. Unknown/deleted IDs return 404. Expiry is
+inclusive; the first lookup of a retained expired row deletes it and returns 410.
+Startup also prunes expired rows, so an already-pruned ID returns 404. Error
+messages never echo the selected ID. Wrapped-key integrity failures return a
+static 500 and do not treat edited timestamps as trusted expiry instructions.
+
+Deletion cascades to mappings in the same transaction. No unwrapped HMAC keys are
+cached across operations; scoped request references are released in `finally`.
+Deletion does not prevent recovery from old database copies or guarantee memory
+erasure. The current scaffold makes no upstream calls; coordinating active
+persistent requests with deletion/expiry is Phase 2 task 6.

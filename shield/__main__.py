@@ -24,8 +24,10 @@ def main() -> None:
         parser.error(str(exc))
     except KeyboardInterrupt:
         parser.exit(130, "Startup cancelled.\n")
+    app = create_app(config, credentials)
+    del credentials  # Lifespan owns the startup reference until authentication.
     uvicorn.run(
-        create_app(config, credentials),
+        app,
         host=config.server.host,
         port=config.server.port,
     )

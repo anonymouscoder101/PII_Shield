@@ -38,7 +38,7 @@ def load_credentials(config: ShieldConfig) -> RuntimeCredentials:
     """An absent provider key is allowed for the scaffold and local fake upstream.
 
     Provider authentication requirements will be enforced by the upstream client.
-    A persistent-session opt-in collects a passphrase; vault unlock is Phase 2.
+    Persistent-session opt-in collects a passphrase for authenticated lifespan startup.
     """
     value = os.environ.get(config.upstream.api_key_env)
     if value is not None and (not value or any(char.isspace() for char in value)):
