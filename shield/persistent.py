@@ -14,8 +14,15 @@ from uuid import uuid4
 
 from pydantic import SecretBytes, SecretStr
 
+from shield import pseudonym
 from shield.config import VaultConfig
-from shield.contracts import ErrorCode, SessionKind, SessionRecord, TokenMapping
+from shield.contracts import (
+    EntityType,
+    ErrorCode,
+    SessionKind,
+    SessionRecord,
+    TokenMapping,
+)
 from shield.session import generate_hmac_key
 from shield.vault import (
     PersistentSessionRow,
@@ -81,6 +88,17 @@ class PersistentSessionState:
         _ = self.key
         with VaultStore(self._service.config.path) as store:
             return store.read_mapping(self.session_id, token, self._service._key)
+
+    def allocate(
+        self, entity_type: EntityType, value: SecretStr
+    ) -> pseudonym.TokenAllocation:
+        """Allocate and commit identity under the active session lease."""
+        key = self.key
+        self.commit_mappings()
+        with VaultStore(self._service.config.path) as store:
+            return store.allocate_token(
+                self.session_id, entity_type, value, key, self._service._key
+            )
 
     async def send[T](self, callback: Callable[[], Awaitable[T]]) -> T:
         """Invoke a send only after commit succeeds; caller retains scope to restore."""

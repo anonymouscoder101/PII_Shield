@@ -98,3 +98,10 @@ extensions, Unicode/canonical equivalence, IP prefixes/zones, and conservative
 fallbacks. It verifies HMAC input bytes, full digests, stable labels, bounded Base32
 suffixes, masked outputs, session independence, and normalization idempotence.
 These tests require no model, database or provider calls.
+
+
+`test_token_allocation.py` forces every suffix-collision step and exhaustion,
+checks full-digest reuse and first-spelling restoration, and verifies concurrent
+memory/SQLite allocations create one mapping. It forbids decryption during
+persistent reuse, reopens sessions, checks encryption rollback, invalid metadata,
+closed scopes, index refresh and plaintext/key absence in persistent artifacts.

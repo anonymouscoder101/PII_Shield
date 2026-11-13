@@ -19,6 +19,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from pydantic import Field, SecretBytes, SecretStr, model_validator
 
+from shield import pseudonym
 from shield.config import Argon2Config
 from shield.contracts import (
     Contract,
@@ -489,3 +490,55 @@ class VaultStore:
                 raise VaultEntryError("Vault entry authentication failed.") from None
             result = decrypt_entry(row, key)
         return result
+
+    def allocate_token(
+        self,
+        session_id: str,
+        entity_type: EntityType,
+        value: SecretStr,
+        session_key: SecretBytes,
+        vault_key: SecretBytes,
+    ) -> pseudonym.TokenAllocation:
+        """Select by full digest, resolve suffix, encrypt and insert in one transaction.
+
+        Metadata-only reuse does not authenticate/decrypt an entry value; trusted
+        restoration uses read_mapping for authenticated plaintext access.
+        The caller owns session authorization and its active request lease.
+        """
+        try:
+            derived = pseudonym.derive_token(entity_type, value, session_key)
+            with self.transaction() as db:
+                values = db.execute(
+                    "SELECT token, entity_type, entity_digest FROM entries "
+                    "WHERE session_id = ? AND entity_digest = ?",
+                    (session_id, derived.entity_digest),
+                ).fetchone()
+                metadata = (
+                    None
+                    if values is None
+                    else (values[0], EntityType(values[1]), values[2])
+                )
+
+                def occupied(token):
+                    row = db.execute(
+                        "SELECT entity_digest FROM entries "
+                        "WHERE session_id=? AND token=?",
+                        (session_id, token),
+                    ).fetchone()
+                    return None if row is None else row[0]
+
+                allocated = pseudonym._select_token(derived, metadata, occupied)
+                if not allocated.reused:
+                    mapping = TokenMapping(
+                        session_id=session_id,
+                        token=allocated.token,
+                        entity_type=entity_type,
+                        entity_digest=allocated.entity_digest,
+                        original_value=value,
+                    )
+                    self._insert_entries(db, [encrypt_entry(mapping, vault_key)])
+            return allocated
+        except pseudonym.PseudonymError:
+            raise
+        except Exception:
+            raise pseudonym.PseudonymError("Token allocation failed.") from None

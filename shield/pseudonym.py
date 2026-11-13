@@ -51,8 +51,8 @@ class PseudonymError(ValueError):
 class TokenDerivation(Contract):
     """Candidate display token and full identity; no original/normalized text.
 
-    A candidate is not an allocated mapping. Task 5 must check full identity and
-    suffix collisions atomically before a token is used or sent upstream.
+    A candidate is not an allocated mapping. Session allocation checks full identity
+    and suffix collisions atomically before a token is used or sent upstream.
     """
 
     entity_type: EntityType
@@ -159,7 +159,7 @@ def derive_token(
     """HMAC-SHA256(key, UTF8(detector type) + NUL + UTF8(normalized value)).
 
     Only the unpadded uppercase Base32 prefix is displayed. Retain all 32 bytes
-    as the identity for task 5's lookup and collision allocation. No secrets are
+    as the identity for session lookup and collision allocation. No secrets are
     cached, written, logged or included in the returned model dump.
     """
     try:
@@ -185,3 +185,66 @@ def derive_token(
         )
     except Exception:
         raise PseudonymError("Pseudonym derivation failed.") from None
+
+
+SUFFIX_LENGTHS = (4, 6, 8, 12, 16, 20, 24, 28, 32)
+
+
+class TokenCollisionError(PseudonymError):
+    """All supported suffix lengths are occupied; never overwrite a mapping."""
+
+
+class TokenAllocation(TokenDerivation):
+    reused: bool
+    collision_count: Annotated[int, Field(ge=0)]
+
+
+def _select_token(derived, existing, lookup_token) -> TokenAllocation:
+    """Caller MUST hold its memory lock or SQLite write transaction throughout."""
+    entity, digest = derived.entity_type, derived.entity_digest
+    if existing is not None:
+        token, stored_type, stored_digest = existing
+        if (
+            not isinstance(stored_type, EntityType)
+            or not isinstance(stored_digest, bytes)
+            or stored_type != entity
+            or stored_digest != digest
+            or token
+            not in {
+                format_token(entity, digest, suffix_length=length)
+                for length in SUFFIX_LENGTHS
+            }
+        ):
+            raise PseudonymError("Token identity metadata is invalid.")
+        return TokenAllocation(
+            entity_type=entity,
+            label=TOKEN_LABELS[entity],
+            token=token,
+            entity_digest=digest,
+            reused=True,
+            collision_count=0,
+        )
+    for collisions, length in enumerate(SUFFIX_LENGTHS):
+        token = format_token(entity, digest, suffix_length=length)
+        occupied = lookup_token(token)
+        if occupied is None:
+            return TokenAllocation(
+                entity_type=entity,
+                label=TOKEN_LABELS[entity],
+                token=token,
+                entity_digest=digest,
+                reused=False,
+                collision_count=collisions,
+            )
+        if not isinstance(occupied, bytes) or len(occupied) != 32:
+            raise PseudonymError("Token identity metadata is invalid.")
+        if occupied == digest:
+            return TokenAllocation(
+                entity_type=entity,
+                label=TOKEN_LABELS[entity],
+                token=token,
+                entity_digest=digest,
+                reused=True,
+                collision_count=collisions,
+            )
+    raise TokenCollisionError("Token suffix allocation exhausted.")

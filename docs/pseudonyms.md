@@ -1,10 +1,11 @@
 # Normalization and deterministic token derivation
 
-Phase 3 task 4 adds `shield/pseudonym.py`. It derives a candidate token and a full
+Phase 3 tasks 4–5 add `shield/pseudonym.py`. It derives a candidate token and a full
 HMAC identity from a session key, a typed entity, and a masked source value.
 `normalize_entity(EntityType, SecretStr)` returns a masked normalized value;
 `derive_token(EntityType, SecretStr, SecretBytes)` returns `TokenDerivation`.
-No keys or values are cached, logged, or written to disk by this module.
+Derivation itself caches no keys or values and performs no logging or I/O.
+Allocation uses the selected session store, as described below.
 
 ## Per-type normalization
 
@@ -96,12 +97,78 @@ Normalization rules, type-domain names, labels and token syntax are compatibilit
 decisions; changes require an explicit migration/version decision before existing
 persistent sessions are reused.
 
-## Following tasks
+## Atomic allocation and full-digest reuse
 
-These are candidate derivation/formatting primitives, not a mapping allocator.
-A short suffix can collide. Task 5 must compare full digests and atomically reuse
-or allocate mappings, extending suffixes without overwriting another identity.
-That layer also retains the first observed spelling for restoration when two
-values normalize identically. No plaintext comparison or decryption is needed
-for digest identity. Task 6 applies replacements to text; the gateway remains
-blocked until the protected pipeline is implemented.
+`EphemeralSession.allocate(type, SecretStr(value))` and
+`PersistentSessionState.allocate(type, SecretStr(value))` return `TokenAllocation`:
+the derived type, label, chosen token, full digest (hidden from representation and
+serialization), `reused`, and `collision_count`. Obtain the persistent state from
+`with service.use(session_id) as active:` so its exclusive request lease remains
+held through allocation, send and restoration. Closed scopes cannot allocate.
+
+For each call:
+
+1. Normalize and derive the complete 32-byte HMAC identity with that session's key.
+2. Look up the full digest in the selected session before considering a suffix.
+   An equal digest returns the stored token, including an already-extended token.
+   Stored type/token metadata must agree with the identity. No original-value
+   equality comparison or decryption is performed for identity decisions.
+3. For a new digest, try suffix lengths **4, 6, 8, 12, 16, 20, 24, 28, 32** in order.
+   A token occupied by a different full digest is a collision; never overwrite it.
+   The token includes its label, so an identical suffix under a different label
+   is not a collision. `collision_count` counts occupied candidates skipped by
+   this allocation. Digest reuse normally reports zero new collisions.
+4. Insert the chosen token, full digest, and the first original spelling. Return
+   only after the insertion succeeds; persistent allocation returns after commit.
+5. If every supported prefix is occupied, raise static `TokenCollisionError` and
+   leave the store unchanged. No full-digest token, random replacement, overwrite
+   or decryption-based fallback is used.
+
+The first successful insertion defines restoration spelling. For example, names
+`" Alice  Smith "` and `"ALICE SMITH"` share one identity but restore to the first
+observed spelling. In concurrent allocation the first successful lock/transaction
+wins; input scheduling order is not promised. Case-sensitive secret and employee
+ID variants retain different identities, as defined above.
+
+### Ephemeral memory storage
+
+Each request owns a reentrant allocation lock, a full-digest index, and a
+`MemoryMappings` view. Every mutation of that view uses the same lock and changes
+a version; allocation rebuilds its metadata index after external view mutations.
+Invalid session/token/digest metadata and duplicate full identities fail closed.
+Index rebuilding never reads or compares original values. Normal allocation keeps
+the index current without scanning every existing mapping on each call.
+
+Digest lookup, token occupancy checks, and insertion happen while holding that
+single lock. Concurrent calls for the same identity create one mapping. Session
+close clears the mappings and digest index and releases its key reference. This
+path has no vault dependency or disk writes. Direct mutation of mapping metadata
+must remain consistent; prefer allocation for new identities.
+
+### Persistent encrypted storage
+
+`VaultStore.allocate_token(...)` owns one `BEGIN IMMEDIATE` transaction spanning
+full-digest lookup, suffix checks, encryption and insert. SQLite's per-session
+digest and token uniqueness constraints provide a second guard. Independent
+connections cannot both insert the same identity or claim one display token.
+Encryption or commit failure rolls the transaction back before returning a token.
+Persistent state flushes any existing manually staged mappings before invoking
+this allocator. Each entity allocation commits independently; a later allocation
+or provider failure does not roll back earlier successful entity registrations.
+
+The persistent allocator stores the first original value only as AES-GCM
+ciphertext. Reuse selects identity metadata and returns the token without
+reading plaintext. This lookup does **not** authenticate the entry ciphertext;
+`read_mapping` authenticates the complete entry AAD and ciphertext before exposing
+a value for restoration. Modified identity metadata that happens to pass format
+checks still fails authentication when its ciphertext is used. Schema/key/metadata
+corruption never authorizes a plaintext comparison as an identity fallback.
+
+The service's request lease prevents deletion/expiry racing API allocations.
+The raw vault method is a trusted internal primitive; its caller supplies the
+session HMAC key, authenticated vault key, and valid active session. Low-level
+transaction tests use independent connections to exercise the database boundary.
+No full digests or original values belong in upstream payloads or metrics.
+
+Task 6 substitutes allocated tokens into text. The HTTP analysis endpoint and
+protected gateway remain subsequent tasks.

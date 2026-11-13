@@ -3,11 +3,14 @@
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from threading import RLock
 from uuid import uuid4
 
-from pydantic import SecretBytes
+from pydantic import SecretBytes, SecretStr
 
-from shield.contracts import TokenMapping
+from shield import pseudonym
+from shield.contracts import EntityType, TokenMapping
+from shield.memory_mappings import MemoryMappings
 
 
 class SessionKeyError(ValueError):
@@ -29,12 +32,22 @@ class EphemeralSession:
     object's references; Python/host memory cannot provide secure erasure.
     """
 
-    __slots__ = ("session_id", "_key", "mappings")
+    __slots__ = (
+        "session_id",
+        "_key",
+        "mappings",
+        "_lock",
+        "_by_digest",
+        "_indexed_version",
+    )
 
     def __init__(self) -> None:
         self._key: SecretBytes | None = generate_hmac_key()
         self.session_id = uuid4().hex
-        self.mappings: dict[str, TokenMapping] = {}
+        self._lock = RLock()
+        self.mappings = MemoryMappings(self._lock)
+        self._by_digest: dict[bytes, str] = {}
+        self._indexed_version = self.mappings.version
 
     @property
     def key(self) -> SecretBytes:
@@ -43,8 +56,69 @@ class EphemeralSession:
         return self._key
 
     def close(self) -> None:
-        self.mappings.clear()
-        self._key = None
+        with self._lock:
+            self.mappings.clear()
+            self._by_digest.clear()
+            self._indexed_version = self.mappings.version
+            self._key = None
+
+    def allocate(
+        self, entity_type: EntityType, value: SecretStr
+    ) -> pseudonym.TokenAllocation:
+        """Atomic full-digest reuse/lookup/insert, without comparing original values."""
+        with self._lock:
+            key = self.key
+            try:
+                derived = pseudonym.derive_token(entity_type, value, key)
+                if self._indexed_version != self.mappings.version:
+                    index = {}
+                    for token, mapping in self.mappings.items():
+                        if (
+                            not isinstance(mapping, TokenMapping)
+                            or mapping.session_id != self.session_id
+                            or token != mapping.token
+                            or len(mapping.entity_digest) != 32
+                        ):
+                            raise pseudonym.PseudonymError(
+                                "Token identity metadata is invalid."
+                            )
+                        if mapping.entity_digest in index:
+                            raise pseudonym.PseudonymError("Duplicate entity identity.")
+                        index[mapping.entity_digest] = token
+                    self._by_digest = index
+                    self._indexed_version = self.mappings.version
+                existing_token = self._by_digest.get(derived.entity_digest)
+                existing = (
+                    self.mappings[existing_token]
+                    if existing_token is not None
+                    else None
+                )
+                metadata = (
+                    None
+                    if existing is None
+                    else (existing.token, existing.entity_type, existing.entity_digest)
+                )
+
+                def occupied(token):
+                    mapping = self.mappings.get(token)
+                    return None if mapping is None else mapping.entity_digest
+
+                allocated = pseudonym._select_token(derived, metadata, occupied)
+                if not allocated.reused:
+                    self.mappings[allocated.token] = TokenMapping(
+                        session_id=self.session_id,
+                        token=allocated.token,
+                        entity_type=entity_type,
+                        entity_digest=allocated.entity_digest,
+                        original_value=value,
+                    )
+                self._by_digest[allocated.entity_digest] = allocated.token
+                self._indexed_version = self.mappings.version
+                return allocated
+            except pseudonym.PseudonymError:
+                raise
+            except Exception:
+                raise pseudonym.PseudonymError("Token allocation failed.") from None
 
 
 @contextmanager
