@@ -171,5 +171,6 @@ transaction tests use independent connections to exercise the database boundary.
 No full digests or original values belong in upstream payloads or metrics.
 
 [Text substitution](substitution.md) now applies allocated tokens while keeping
-original coordinates and exact known session placeholders. The HTTP analysis
-endpoint and protected gateway remain subsequent tasks.
+original coordinates and exact known session placeholders. The
+[analysis HTTP endpoint](api-contract.md#local-analysis-endpoint) now uses this
+allocator; protected upstream forwarding remains a later task.

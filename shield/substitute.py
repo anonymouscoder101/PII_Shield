@@ -173,7 +173,8 @@ def substitute_spans(
 ) -> SubstitutionResult:
     """Apply validated, disjoint resolved spans. Unknown input tokens fail first."""
     try:
-        _ = session.key
+        if not isinstance(session.key, SecretBytes):
+            raise TokenSubstitutionError("Token substitution failed.")
         ranges = _known_ranges(text, session)
         return _apply(text, _checked(text, spans), ranges, session)
     except UnknownSessionToken:
@@ -192,7 +193,8 @@ def sanitize_texts(
     fail rather than erase the placeholder or leak an outside part of the span.
     """
     try:
-        _ = session.key
+        if not isinstance(session.key, SecretBytes):
+            raise TokenSubstitutionError("Token substitution failed.")
         sources = tuple(texts)
         ranges_by_text = [_known_ranges(text, session) for text in sources]
         results = []

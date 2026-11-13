@@ -8,7 +8,13 @@ from typing import Annotated, Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
-from shield.contracts import Contract, Count, NonEmptyString
+from shield.contracts import (
+    Contract,
+    Count,
+    DetectedSpan,
+    NonEmptyString,
+    ProtectionReport,
+)
 
 PositiveInt = Annotated[int, Field(ge=1)]
 FinishReason = Literal["stop", "length", "content_filter"]
@@ -153,3 +159,17 @@ class SessionResponse(Contract):
     session_id: NonEmptyString
     created_at: AwareDatetime
     expires_at: AwareDatetime
+
+
+class AnalyzeRequest(Contract):
+    text: str = Field(repr=False)
+
+
+class AnalyzeResponse(Contract):
+    sanitized_text: str = Field(repr=False)
+    spans: tuple[DetectedSpan, ...]
+    report: ProtectionReport
+    preserved_token_count: Count
+    below_threshold_count: Count
+    preview_only: bool
+    session_id: NonEmptyString | None = None

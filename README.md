@@ -18,7 +18,7 @@ encryption with authenticated reads. Ephemeral requests receive independent
 memory-only HMAC keys. Optional persistent sessions support startup unlock,
 creation, lookup, restart recovery, TTL enforcement, and deletion.
 See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
-Phase 3 tasks #1–6 add explicit local Stage 1 detection with the pinned spaCy
+Phase 3 tasks #1–7 add explicit local Stage 1 detection with the pinned spaCy
 English model, an audited Presidio registry, and a numbered-street address
 baseline, labeled birth dates, API keys/secrets, and configurable employee IDs.
 Phone regions and location/address coverage are configurable. Shared span policy
@@ -94,8 +94,9 @@ initialize or unlock the configured vault. `POST /shield/sessions` returns 201
 with reusable session metadata and `X-Shield-Session`; `GET /shield/sessions/{id}`
 returns metadata, and `DELETE /shield/sessions/{id}` returns 204. Unknown IDs return
 404; encountering an expired idle session removes it and returns 410. A busy
-session returns 409; retry after its active request finishes. The analysis
-endpoint is not available yet.
+session returns 409; retry after its active request finishes. `POST /shield/analyze`
+now returns a local sanitized preview and original-coordinate spans. See
+[the analysis API](docs/api-contract.md#local-analysis-endpoint).
 Stop with Ctrl-C.
 
 ## Run the fake upstream
@@ -280,3 +281,31 @@ mappings before invoking the callback, and never calls it if commit fails. Use
 restoration, then exit to release its key and mappings. Standalone service calls
 for that session are competing operations; they cannot reenter an active scope.
 The chat scaffold still makes no upstream calls until Phase 4.
+
+
+## Local analysis
+
+Install the pinned model extra and start the server:
+
+```sh
+uv sync --locked --extra stage1 --inexact
+uv run --locked --extra stage1 pii-shield
+```
+
+Then submit synthetic text without a provider call:
+
+```sh
+curl -s http://127.0.0.1:8000/shield/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Email synthetic@example.test."}'
+```
+
+The response includes sanitized text, original-coordinate redaction spans,
+protection/disclosure counts and `preview_only`. Without a session header,
+keys/mappings are request-local and discarded before success returns; those
+tokens cannot be resumed. To retain mappings, opt into persistent sessions,
+create one, and send its ID in `X-Shield-Session`. Only explicit selections return
+that header and a response session ID. Detection is local and loaded lazily on
+the first analysis request; no model is downloaded at runtime. Missing models
+produce a safe 503 while other local routes can still run. Unknown canonical
+input placeholders return 400. The protected chat route remains a 503 scaffold.

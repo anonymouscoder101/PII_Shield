@@ -112,3 +112,11 @@ Unicode/repeated/adjacent spans, exact known-token preservation, unknown/cross-s
 rejection, batch preflight, policy-filtered boundaries, allocation errors and
 persistent restart without plaintext lookup. It also runs the real detector and
 a property test proving every unselected Unicode segment remains unchanged.
+
+
+`test_analyze_api.py` covers the real local analysis endpoint plus deterministic
+injected detectors: strict JSON, Unicode coordinates, policy counts, ephemeral
+cleanup/no vault access, explicit-session persistence/restart, safe errors,
+no-provider behavior, size/timeout limits and cancellation. Event-controlled
+workers verify lease retention while cancelled work drains, and a direct ASGI
+`http.disconnect` test verifies prompt cleanup on an actual disconnect.

@@ -15,8 +15,9 @@ parameters such as `charset=utf-8`). It validates the request and returns **503*
 session while the vault is locked returns **423** `vault_locked`.
 `POST /shield/sessions` accepts an empty object or no body, rejects extra fields
 including credentials, and creates a reusable session only when the vault is unlocked.
-The scaffold makes no upstream calls. Detection, protection, restoration, actual
-and buffered SSE delivery are implemented in later phases. `/docs` and `/openapi.json` expose the contract.
+The app makes no upstream calls. Local detection/substitution are available at
+`POST /shield/analyze`; protected chat forwarding, restoration and buffered SSE
+delivery arrive in later phases. `/docs` and `/openapi.json` expose the contract.
 
 ```json
 {
@@ -233,3 +234,72 @@ vault. A second owner (including another worker process) fails startup. The lock
 file is retained on disk; do not unlink it while any owner could be running.
 This coordinates application services, not arbitrary programs editing SQLite.
 No lock is needed or acquired for default ephemeral requests.
+
+
+## Local analysis endpoint
+
+`POST /shield/analyze` accepts `Content-Type: application/json` and exactly one
+required field: `text`, a string (including empty text). Non-string text, extra
+fields, body session IDs, credentials, metadata, messages and client-selected
+models are rejected with 400. Session selection uses the same strict
+`X-Shield-Session` header rules as chat. Request-size and timeout limits apply.
+
+```json
+{"text":"Email synthetic@example.test."}
+```
+
+Successful responses contain:
+
+| Field | Meaning |
+| --- | --- |
+| `sanitized_text` | Original text with accepted spans replaced by registered tokens |
+| `spans` | Final redaction spans: original Python-string `start`/`end`, `entity_type`, `confidence`, `stage` |
+| `report` | Protected counts/total, separate allowlisted-disclosure counts/total, and unknown-token count (zero until restoration) |
+| `preserved_token_count` | Exact existing session-token occurrences left unchanged |
+| `below_threshold_count` | Unique candidate detections discarded by the confidence policy |
+| `preview_only` | `true` for ephemeral operation; `false` for an explicit persistent session |
+| `session_id` | Present only when an explicit persistent session was selected |
+
+These spans describe newly replaced intervals, not every raw candidate or
+allowlisted decision. Coordinates always refer to the submitted text, even when
+replacement lengths differ or text contains emoji/combining characters. Existing
+placeholders are counted separately. Allowlists can intentionally leave sensitive
+text visible; detector misses can also remain. Analysis is not a guarantee of
+complete PII removal.
+
+Default requests require no vault and return no reusable ID or session header.
+A new in-memory key/mapping store is used for every request and closed before a
+success result leaves the worker. Ephemeral tokens are preview-only: submitting
+one in a subsequent request without its original session is an unknown-token
+error. With an explicit persistent ID, mappings are encrypted and committed before
+success; later analyses reuse their full identities and first observed spellings.
+Success returns `X-Shield-Session` only for that explicit selection. Every success
+also returns `Cache-Control: no-store`. Keys, digests, original mapping values and
+internal ephemeral IDs are never response fields.
+
+Canonical token syntax is reserved as described in [substitution](substitution.md).
+Unknown/cross-session canonical placeholders return static 400 `invalid_request`.
+Locked/disabled persistence returns 423, unknown/deleted IDs 404, expired IDs 410,
+and competing active-session operations 409. No failure silently creates an
+alternative persistent or ephemeral session. Error responses return no session
+header. Missing/unloadable models and known sanitization failures return safe
+503 `detection_failed`; unexpected internal failures return a static 500.
+
+The detector is initialized lazily with the configured recognition and span
+policy, once per app after successful loading. Model loading and analysis run
+in a worker. No runtime downloader or provider request is used. App construction,
+config loading, startup with persistence disabled and malformed-body rejection do
+not load a model. The CLI uses the pinned `stage1` optional dependency; install it
+with `uv sync --locked --extra stage1` before using real analysis.
+
+On timeout or task cancellation, the job signals cancellation and closes its
+published session state. It blocks subsequent mapping operations and response
+publication. The route also monitors ASGI disconnects; a dropped connection does
+not otherwise cancel a normal FastAPI JSON route automatically. Disconnects discard
+the result and trigger the same cleanup. CPU/model work and an in-flight SQLite
+transaction cannot be forcibly interrupted. The worker retains its persistent
+lease until it drains, so competing operations can temporarily continue returning
+409 after the HTTP request is gone. Successful earlier persistent allocations
+remain under normal TTL/deletion policy. This is reference cleanup, not secure
+memory erasure or a guarantee that a running worker has stopped retaining source
+text. No upstream request is made by this endpoint on success or failure.

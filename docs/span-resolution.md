@@ -8,8 +8,8 @@ text; subsequent mutations to a configuration list cannot change its decisions.
 Use `Stage1Detector.load(config).analyze(text)` for detection plus resolution,
 or `SpanPolicy(config).resolve(text, candidates)` for already-detected original
 coordinates. `detect(text)` remains available for raw candidate inspection and
-evaluation. The HTTP analysis endpoint and actual substitution arrive in later
-tasks. The future gateway guard must use this same detector/policy configuration.
+evaluation. [Substitution](substitution.md) and the
+[HTTP analysis endpoint](api-contract.md#local-analysis-endpoint) now use this policy. The future gateway guard must use this same detector/policy configuration.
 
 ## Decision order
 

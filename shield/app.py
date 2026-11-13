@@ -1,4 +1,4 @@
-"""ASGI scaffold. Protection and proxy endpoints are not implemented yet."""
+"""Local analysis and session routes; protected chat forwarding follows later."""
 
 from contextlib import asynccontextmanager
 
@@ -6,7 +6,15 @@ from fastapi import Depends, FastAPI, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from shield import __version__
+from shield.analysis import (
+    AnalysisJob,
+    DetectorFactory,
+    DetectorProvider,
+    run_analysis_job,
+)
 from shield.api import (
+    AnalyzeRequest,
+    AnalyzeResponse,
     ChatCompletionRequest,
     ChatCompletionResponse,
     SessionCreateRequest,
@@ -30,6 +38,8 @@ from shield.session_access import require_session_access, require_unlocked_vault
 def create_app(
     config: ShieldConfig | None = None,
     credentials: RuntimeCredentials | None = None,
+    *,
+    detector_factory: DetectorFactory | None = None,
 ) -> FastAPI:
     """Create routes without I/O; opt-in vault authentication runs during lifespan."""
 
@@ -66,7 +76,8 @@ def create_app(
     app = FastAPI(
         title="PII Shield",
         description=(
-            "Foundation scaffold. PII protection endpoints are not available yet."
+            "Local PII analysis and optional reusable sessions. "
+            "Chat forwarding is not implemented yet."
         ),
         version=__version__,
         lifespan=lifespan,
@@ -74,6 +85,9 @@ def create_app(
     app.state.config = config if config is not None else ShieldConfig()
     app.state.credentials = (
         credentials if credentials is not None else RuntimeCredentials()
+    )
+    app.state.detector_provider = DetectorProvider(
+        app.state.config.detection, detector_factory
     )
     app.state.vault = None  # Authenticated service is installed only during lifespan.
     install_error_handlers(app)
@@ -131,6 +145,35 @@ def create_app(
                 raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
         with request.app.state.vault.use(request.headers["x-shield-session"]):
             raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
+
+    @app.post(
+        "/shield/analyze",
+        response_model=AnalyzeResponse,
+        response_model_exclude_none=True,
+        dependencies=[Depends(require_json)],
+        responses={"4XX": {"model": APIError}, 503: {"model": APIError}},
+        description=(
+            "Local analysis only. Default tokens are ephemeral previews; "
+            "an explicit session retains mappings."
+        ),
+    )
+    async def analyze_text(
+        body: AnalyzeRequest, request: Request, response: Response
+    ) -> AnalyzeResponse:
+        require_session_access(request)
+        session_id = request.headers.get("x-shield-session")
+        service = request.app.state.vault if session_id is not None else None
+        job = AnalysisJob(request.app.state.detector_provider, service, session_id)
+        try:
+            result = await run_analysis_job(job, body.text, request.receive)
+            if result is None:
+                raise ShieldError(ErrorCode.REQUEST_TIMEOUT)
+        finally:
+            job.cancel()
+        response.headers["Cache-Control"] = "no-store"
+        if session_id is not None:
+            response.headers["X-Shield-Session"] = session_id
+        return result
 
     @app.post(
         "/shield/sessions",
