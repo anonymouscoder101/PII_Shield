@@ -212,3 +212,50 @@ def test_regex_timeout_fails_instead_of_returning_partial_detections(
     monkeypatch.setattr(pattern, "compiled_regex", stage1._StrictRegex(TimeoutRegex()))
     with pytest.raises(Stage1DetectionError):
         detector.detect("synthetic@example.test")
+
+
+def test_analyze_applies_snapshot_policy_and_retains_raw_detection(detector):
+    from shield.config import DetectionConfig
+
+    changed = Stage1Detector(
+        detector._analyzer.nlp_engine.nlp["en"],
+        config=DetectionConfig(threshold=0.8, allowlist=["EMP-123456"]),
+    )
+    text = "Employee EMP-123456, password=syntheticsecret"
+    assert any(
+        span.entity_type == EntityType.EMPLOYEE_ID for span in changed.detect(text)
+    )
+    result = changed.analyze(text)
+    assert all(span.entity_type != EntityType.EMPLOYEE_ID for span in result.spans)
+    assert result.report.allowlisted_disclosure_counts == {EntityType.EMPLOYEE_ID: 1}
+    value_start = text.index("syntheticsecret")
+    assert any(
+        span.start <= value_start and span.end >= len(text) for span in result.spans
+    )
+    strict = Stage1Detector(
+        detector._analyzer.nlp_engine.nlp["en"], config=DetectionConfig(threshold=1)
+    )
+    assert strict.detect("EMP-123456")
+    assert strict.analyze("EMP-123456").spans == ()
+
+
+def test_nested_same_type_match_survives_allowlisted_outer_value(detector):
+    from shield.config import DetectionConfig
+
+    text = 'password="Bearer syntheticsecret12345"'
+    outer = "Bearer syntheticsecret12345"
+    inner = "syntheticsecret12345"
+    changed = Stage1Detector(
+        detector._analyzer.nlp_engine.nlp["en"],
+        config=DetectionConfig(allowlist=[outer]),
+    )
+    candidates = changed.detect(text)
+    assert any(
+        span.entity_type == EntityType.SECRET and text[span.start : span.end] == inner
+        for span in candidates
+    )
+    result = changed.analyze(text)
+    start = text.index(inner)
+    assert any(
+        span.start <= start and span.end >= start + len(inner) for span in result.spans
+    )

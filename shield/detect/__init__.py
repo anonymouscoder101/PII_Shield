@@ -1,1 +1,1 @@
-"""Local Stage 1 detection; policy resolution and contextual review follow later."""
+"""Local Stage 1 detection and shared span policy; contextual review follows later."""

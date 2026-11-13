@@ -1,10 +1,11 @@
 # Stage 1 detector
 
-Phase 3 tasks 1–2 provide `shield/detect/stage1.py`. The detector returns candidate
+Phase 3 tasks 1–3 provide `shield/detect/stage1.py`. The detector returns candidate
 `DetectedSpan` objects with Python string offsets, entity types, confidence
 scores and `stage1`; it retains no source values in the returned contracts.
-It does not yet redact, tokenize, enforce allowlists/thresholds, resolve overlaps
-or forward requests. Those are subsequent tasks. The chat route continues to
+`detect(text)` returns raw candidates; `analyze(text)` applies shared confidence,
+allowlist and overlap policy. Neither operation yet tokenizes or forwards requests.
+See [span resolution](span-resolution.md) for exact ordering and report semantics. The chat route continues to
 return 503 and makes no provider calls.
 
 ## Setup and explicit loading
@@ -77,9 +78,10 @@ reliably recognize every invented name or address.
 
 `detect(text)` asks only for the audited entity set and requests Presidio scores
 from zero upward. It returns spans sorted by start, end, type and descending
-score. Presidio's built-in validation, context enhancement and same-type duplicate
-suppression still apply. Shield confidence/allowlist/overlap policy is task 3;
-configuration thresholds are not applied by this raw detector. Empty text returns
+score. Presidio's built-in validation and context enhancement still apply. The
+candidate adapter preserves nested matches across patterns and recognizers until
+Shield applies threshold/allowlist policy. Configuration thresholds are not applied by this raw
+detector; call `analyze(text)` to apply the shared policy snapshot. Empty text returns
 an empty list. All result types, scores and bounds are validated against the
 original source before returning; malformed results fail the complete call.
 
@@ -164,5 +166,5 @@ false positives are also possible. No entropy-based secret discovery is claimed.
 
 Custom pattern scores start at 0.85. Presidio upgrades calendar-validated DOB
 scores to 1.0; these are heuristic scores, not probabilities. An API-shaped
-secret may produce both `API_KEY` and `SECRET` candidates. Task 3 will apply the
-shared threshold/allowlist policy and deterministic overlap resolution.
+secret may produce both `API_KEY` and `SECRET` candidates. `analyze(text)` applies
+the shared threshold/allowlist policy and deterministic overlap resolution.

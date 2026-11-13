@@ -1,7 +1,8 @@
 """Local English Presidio/spaCy candidate detection, before policy resolution.
 
 Loading is explicit and never downloads a model. Results contain coordinates,
-types and scores only. Threshold/allowlist/overlap policy is Phase 3 task 3.
+types and scores only. analyze() applies the shared threshold/allowlist/overlap
+policy while detect() retains candidate access for evaluation.
 """
 
 import logging
@@ -12,7 +13,6 @@ from threading import Lock
 import regex
 import spacy
 from presidio_analyzer import (
-    AnalyzerEngine,
     Pattern,
     PatternRecognizer,
     RecognizerRegistry,
@@ -30,12 +30,14 @@ from spacy.language import Language
 
 from shield.config import DetectionConfig
 from shield.contracts import DetectedSpan, EntityType
+from shield.detect.candidates import CandidateAnalyzer
 from shield.detect.recognizers import (
     ApiKeyRecognizer,
     DateOfBirthRecognizer,
     SecretRecognizer,
     employee_id_recognizer,
 )
+from shield.detect.resolve import ResolvedDetections, SpanPolicy
 
 MODEL_NAME = "en_core_web_lg"
 MODEL_VERSION = "3.8.0"
@@ -136,6 +138,7 @@ class Stage1Detector:
             )
         }
         try:
+            self.policy = SpanPolicy(self.config)
             if nlp.lang != "en" or "ner" not in nlp.pipe_names:
                 raise ValueError("English NER required")
             labels = set(nlp.get_pipe("ner").labels)
@@ -209,7 +212,7 @@ class Stage1Detector:
             registry = RecognizerRegistry(
                 recognizers=recognizers, supported_languages=["en"]
             )
-            self._analyzer = AnalyzerEngine(
+            self._analyzer = CandidateAnalyzer(
                 nlp_engine=engine,
                 registry=registry,
                 supported_languages=["en"],
@@ -288,3 +291,7 @@ class Stage1Detector:
                 raise Stage1DetectionError("Stage 1 detection failed.") from None
             finally:
                 _scanning.reset(token)
+
+    def analyze(self, text: str) -> ResolvedDetections:
+        """Detect then apply the shared policy snapshot to original coordinates."""
+        return self.policy.resolve(text, self.detect(text))

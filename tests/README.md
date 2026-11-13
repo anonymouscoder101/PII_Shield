@@ -82,3 +82,11 @@ value-only spans, Unicode/repetition and debug privacy, custom employee patterns
 GB national phone detection, enabled capability policies, invalid/sensitive
 configuration failures and zero-width regex rejection. The full detector tests
 continue to use the pinned local model and synthetic text only.
+
+
+`test_span_resolution.py` exercises shared policy without NLP models: full bounds
+validation, forged contract rejection, inclusive thresholds, exact allowlists,
+Unicode/repeated terms, transitive/nested/adjacent spans, input-order invariance,
+filter-before-merge bridges, deterministic ties and disclosure coverage. A
+Hypothesis test checks accepted character coverage and ordering across generated
+span sets. `test_stage1.py` also verifies detector-plus-policy integration.
