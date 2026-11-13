@@ -248,3 +248,19 @@ def _select_token(derived, existing, lookup_token) -> TokenAllocation:
                 collision_count=collisions,
             )
     raise TokenCollisionError("Token suffix allocation exhausted.")
+
+
+def validate_token_identity(entity_type: EntityType, digest: bytes, token: str) -> None:
+    """Validate registered token metadata without accessing its original value."""
+    if (
+        not isinstance(entity_type, EntityType)
+        or not isinstance(digest, bytes)
+        or len(digest) != 32
+        or not isinstance(token, str)
+        or token
+        not in {
+            format_token(entity_type, digest, suffix_length=length)
+            for length in SUFFIX_LENGTHS
+        }
+    ):
+        raise PseudonymError("Token identity metadata is invalid.")

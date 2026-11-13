@@ -18,13 +18,15 @@ encryption with authenticated reads. Ephemeral requests receive independent
 memory-only HMAC keys. Optional persistent sessions support startup unlock,
 creation, lookup, restart recovery, TTL enforcement, and deletion.
 See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
-Phase 3 tasks #1–5 add explicit local Stage 1 detection with the pinned spaCy
+Phase 3 tasks #1–6 add explicit local Stage 1 detection with the pinned spaCy
 English model, an audited Presidio registry, and a numbered-street address
 baseline, labeled birth dates, API keys/secrets, and configurable employee IDs.
 Phone regions and location/address coverage are configurable. Shared span policy
 validates bounds, filters confidence and exact allowlists, and resolves overlaps
 deterministically. Type-specific normalization, HMAC derivation, and atomic
-full-digest token allocation are available in [pseudonyms](docs/pseudonyms.md). See [Stage 1 detection](docs/stage1-detection.md) for supported types
+full-digest token allocation are available in [pseudonyms](docs/pseudonyms.md).
+[Text substitution](docs/substitution.md) preserves original offsets and exact
+registered session tokens. See [Stage 1 detection](docs/stage1-detection.md) for supported types
 and coverage limits. The proxy's `/v1/chat/completions` still returns 503 until
 the protection pipeline exists; detection is not wired into forwarding yet. Persistent requests now reserve their session through restoration;
 competing operations on that session return 409, and mapping commits precede sending.

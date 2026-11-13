@@ -170,5 +170,6 @@ session HMAC key, authenticated vault key, and valid active session. Low-level
 transaction tests use independent connections to exercise the database boundary.
 No full digests or original values belong in upstream payloads or metrics.
 
-Task 6 substitutes allocated tokens into text. The HTTP analysis endpoint and
-protected gateway remain subsequent tasks.
+[Text substitution](substitution.md) now applies allocated tokens while keeping
+original coordinates and exact known session placeholders. The HTTP analysis
+endpoint and protected gateway remain subsequent tasks.

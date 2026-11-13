@@ -105,3 +105,10 @@ checks full-digest reuse and first-spelling restoration, and verifies concurrent
 memory/SQLite allocations create one mapping. It forbids decryption during
 persistent reuse, reopens sessions, checks encryption rollback, invalid metadata,
 closed scopes, index refresh and plaintext/key absence in persistent artifacts.
+
+
+`test_substitution.py` checks source-order allocation and right-to-left rendering,
+Unicode/repeated/adjacent spans, exact known-token preservation, unknown/cross-session
+rejection, batch preflight, policy-filtered boundaries, allocation errors and
+persistent restart without plaintext lookup. It also runs the real detector and
+a property test proving every unselected Unicode segment remains unchanged.

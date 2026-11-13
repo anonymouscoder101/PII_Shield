@@ -542,3 +542,21 @@ class VaultStore:
             raise
         except Exception:
             raise pseudonym.PseudonymError("Token allocation failed.") from None
+
+    def has_token(self, session_id: str, token: str) -> bool:
+        """Check identity metadata; read_mapping authenticates plaintext separately."""
+        with self.transaction() as db:
+            row = db.execute(
+                "SELECT entity_type, entity_digest FROM entries "
+                "WHERE session_id = ? AND token = ?",
+                (session_id, token),
+            ).fetchone()
+            if row is None:
+                return False
+            try:
+                pseudonym.validate_token_identity(EntityType(row[0]), row[1], token)
+            except ValueError:
+                raise pseudonym.PseudonymError(
+                    "Token identity metadata is invalid."
+                ) from None
+            return True

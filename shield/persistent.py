@@ -89,6 +89,12 @@ class PersistentSessionState:
         with VaultStore(self._service.config.path) as store:
             return store.read_mapping(self.session_id, token, self._service._key)
 
+    def has_token(self, token: str) -> bool:
+        """Recognize only committed exact tokens in this active session."""
+        _ = self.key
+        with VaultStore(self._service.config.path) as store:
+            return store.has_token(self.session_id, token)
+
     def allocate(
         self, entity_type: EntityType, value: SecretStr
     ) -> pseudonym.TokenAllocation:

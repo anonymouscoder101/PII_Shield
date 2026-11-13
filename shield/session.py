@@ -62,6 +62,24 @@ class EphemeralSession:
             self._indexed_version = self.mappings.version
             self._key = None
 
+    def has_token(self, token: str) -> bool:
+        """Check exact ownership and metadata, without reading an original value."""
+        with self._lock:
+            _ = self.key
+            mapping = self.mappings.get(token)
+            if mapping is None:
+                return False
+            if (
+                not isinstance(mapping, TokenMapping)
+                or mapping.session_id != self.session_id
+                or mapping.token != token
+            ):
+                raise pseudonym.PseudonymError("Token identity metadata is invalid.")
+            pseudonym.validate_token_identity(
+                mapping.entity_type, mapping.entity_digest, token
+            )
+            return True
+
     def allocate(
         self, entity_type: EntityType, value: SecretStr
     ) -> pseudonym.TokenAllocation:
