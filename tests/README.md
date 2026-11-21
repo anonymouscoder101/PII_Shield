@@ -124,3 +124,7 @@ workers verify lease retention while cancelled work drains, and a direct ASGI
 `test_gateway.py` covers conversation preparation across all supported roles,
 repeated/restored assistant PII, exact known tokens, whole-batch token preflight,
 separate allowlist counts, preserved options, and chat route integration.
+
+`test_outgoing_guard.py` covers decoded JSON string scanning (including model),
+owned placeholders, allowlist/threshold policy, immutable payload bytes, static
+failure messages, read-only scans, and persistent commit visibility before scanning.

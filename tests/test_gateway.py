@@ -97,7 +97,11 @@ async def test_http_route_runs_detection_for_every_role_before_unavailable():
         )
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "protection_unavailable"
-    assert seen == ["Hello Alice"] * 5
+    assert seen[:5] == ["Hello Alice"] * 5
+    assert "synthetic-model" in seen[5:]
+    for role in ("system", "developer", "user", "assistant"):
+        assert role in seen[5:]
+    assert any("[PERSON_" in text for text in seen[5:])
 
 
 def test_restored_assistant_and_known_token_share_identity():

@@ -183,6 +183,22 @@ def substitute_spans(
         raise TokenSubstitutionError("Token substitution failed.") from None
 
 
+def _resolve_text(text, ranges, detector):
+    masked = _render(text, [(start, end, " " * (end - start)) for start, end in ranges])
+    candidates = _checked(text, detector.detect(masked))
+    if ranges:
+        # Blanking a placeholder can split a credential or change NER
+        # boundaries. Retain original-text evidence so an accepted
+        # crossing span cannot disappear and expose an outside suffix.
+        candidates.extend(_checked(text, detector.detect(text)))
+    starts = [start for start, _ in ranges]
+    candidates = [
+        span for span in candidates if _relation(span, ranges, starts) != "inside"
+    ]
+    resolved = detector.policy.resolve(text, candidates)
+    return resolved
+
+
 def sanitize_texts(
     texts: Iterable[str], session: TokenSession, detector: CandidateDetector
 ) -> tuple[SubstitutionResult, ...]:
@@ -199,22 +215,7 @@ def sanitize_texts(
         ranges_by_text = [_known_ranges(text, session) for text in sources]
         results = []
         for text, ranges in zip(sources, ranges_by_text, strict=True):
-            masked = _render(
-                text, [(start, end, " " * (end - start)) for start, end in ranges]
-            )
-            candidates = _checked(text, detector.detect(masked))
-            if ranges:
-                # Blanking a placeholder can split a credential or change NER
-                # boundaries. Retain original-text evidence so an accepted
-                # crossing span cannot disappear and expose an outside suffix.
-                candidates.extend(_checked(text, detector.detect(text)))
-            starts = [start for start, _ in ranges]
-            candidates = [
-                span
-                for span in candidates
-                if _relation(span, ranges, starts) != "inside"
-            ]
-            resolved = detector.policy.resolve(text, candidates)
+            resolved = _resolve_text(text, ranges, detector)
             results.append(
                 _apply(
                     text,

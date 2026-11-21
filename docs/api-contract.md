@@ -14,7 +14,11 @@ parameters such as `charset=utf-8`). It validates the request and prepares all m
 session (or a fresh ephemeral session). Preparation runs detection, policy, and
 substitution for every supported role, including previous assistant replies.
 It still returns **503** `protection_unavailable` after successful preparation;
-no prepared payload is sent until the final guard and transport are implemented.
+the outgoing payload is serialized once after mapping registration. A final
+read-only Stage 1 scan inspects every decoded JSON string value, including
+`model`, using the same threshold/allowlist policy and exact token ownership
+checks as substitution. JSON escapes cannot conceal text from this scan.
+No prepared payload is sent; blocking and transport are later tasks.
 Detector failures return 503 `detection_failed`; foreign canonical placeholders
 return 400 `invalid_request`. Selecting a persistent
 session while the vault is locked returns **423** `vault_locked`.

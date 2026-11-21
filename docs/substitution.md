@@ -101,3 +101,27 @@ disclosures. Existing placeholders are tracked separately. They are not proof
 that all source PII was detected. The detector, policy and substitution helpers
 perform synchronous work; the eventual gateway must manage its worker/deadline
 boundary while keeping session scope ownership intact.
+
+## Serialized outgoing guard
+
+`prepare_chat` registers each replacement before serializing the outgoing request.
+Ephemeral allocations stay in the active memory store; persistent allocations
+commit atomically to SQLite before serialization and guard execution.
+`PreparedChat.payload` holds immutable UTF-8 JSON bytes, excluded from repr and
+model dumps. Future transport must send those exact bytes rather than serialize
+`PreparedChat.request` again: its nested collections remain mutable.
+
+`scan_payload` in `shield/guard.py` parses those bytes and scans every string leaf,
+including model, roles, and message contents. Object keys are fixed by the strict
+request schema. Unicode, quotes, backslashes, and newlines are decoded according
+to JSON before detection; each value is scanned independently. Only exact tokens
+owned by the active session are exempted. The guard shares substitution's
+placeholder masking and original-text boundary evidence, confidence threshold,
+and exact allowlist rules. It never allocates or rewrites text.
+
+The internal `GuardReport` contains counts of remaining accepted spans, separate
+allowlisted disclosures, and below-threshold candidates. These counts are not
+added to the original protection report, which would double-count disclosures.
+Malformed payloads or detector failures raise static errors; unknown canonical
+tokens fail ownership checks. Task 2 records findings; task 3 will enforce
+blocking. The HTTP route continues to return 503 and sends no upstream requests.

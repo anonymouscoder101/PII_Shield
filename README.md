@@ -33,8 +33,12 @@ Phase 4 task #1 adds conversation preparation in `shield/gateway.py`, wired into
 sanitized in the active session, including restored PII in prior assistant replies.
 Prepared requests preserve generation options and force non-streaming upstream
 mode. Client stream preferences remain on the original request for future SSE delivery.
-The route still returns 503 after preparation: the final guard, transport, and
-restoration are later tasks. No upstream calls are made.
+Phase 4 task #2 freezes the outgoing JSON bytes after mapping registration and
+runs a read-only Stage 1 guard on every decoded string value, including `model`.
+Known session tokens are recognized; JSON escapes are decoded before detection.
+Persistent allocations are committed before this scan; ephemeral mappings stay
+in memory. The route still returns 503 after preparation: blocking, transport,
+and restoration follow in later tasks. No upstream calls are made.
 
 ## Setup with uv
 

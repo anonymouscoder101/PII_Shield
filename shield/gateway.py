@@ -1,7 +1,7 @@
 """Prepare the supported text-only conversation within an active session.
 
-This stage performs no network I/O. The serialized-payload guard and transport
-must be installed before prepared conversations may leave the process.
+This stage performs no network I/O. It registers mappings and scans the exact
+serialized payload. Blocking and transport follow in later implementation tasks.
 """
 
 from collections import Counter
@@ -10,12 +10,15 @@ from pydantic import Field
 
 from shield.api import ChatCompletionRequest
 from shield.contracts import Contract, ProtectionReport
+from shield.guard import GuardReport, scan_payload
 from shield.substitute import CandidateDetector, TokenSession, sanitize_texts
 
 
 class PreparedChat(Contract):
     request: ChatCompletionRequest = Field(repr=False)
     report: ProtectionReport
+    payload: bytes = Field(repr=False, exclude=True)
+    guard: GuardReport
 
 
 def prepare_chat(
@@ -38,10 +41,15 @@ def prepare_chat(
     for result in results:
         protected.update(result.report.protected_counts)
         allowlisted.update(result.report.allowlisted_disclosure_counts)
+    outgoing = request.model_copy(
+        update={"messages": messages, "stream": False, "stream_options": None}
+    )
+    payload = outgoing.model_dump_json(exclude_none=True).encode("utf-8")
+    guard = scan_payload(payload, session, detector)
     return PreparedChat(
-        request=request.model_copy(
-            update={"messages": messages, "stream": False, "stream_options": None}
-        ),
+        request=outgoing,
+        payload=payload,
+        guard=guard,
         report=ProtectionReport(
             protected_counts=dict(protected),
             allowlisted_disclosure_counts=dict(allowlisted),
