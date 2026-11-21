@@ -174,7 +174,8 @@ All public failures use this envelope with a static message:
 
 Validation, request limits, framework errors, locked-vault selection, and the
 unavailable pipeline are exercised by the current chat route. Other codes define
-behavior for their later components; upstream timeouts remain future work.
+behavior for their components; the standalone upstream client implements provider
+timeouts, pending route integration.
 Handlers never return validation inputs, field paths supplied by the caller,
 provider bodies, exception strings, or credentials. Unexpected HTTP exceptions
 produce a fixed log event without traceback text. If an unexpected error occurs
@@ -316,3 +317,44 @@ lease until it drains, so competing operations can temporarily continue returnin
 remain under normal TTL/deletion policy. This is reference cleanup, not secure
 memory erasure or a guarantee that a running worker has stopped retaining source
 text. No upstream request is made by this endpoint on success or failure.
+
+## Upstream transport
+
+Phase 4 task 4 adds `shield/upstream.py`. `UpstreamClient(config, api_key)` is an
+async context manager; use `await client.complete(prepared.payload)` only after
+`prepare_chat` succeeds and while its active session remains open. It sends the
+exact guarded bytes to `<upstream.base_url>/chat/completions`, preserving a custom
+base path. It does not accept downstream headers, invoke detection, open a vault,
+or own a session. The public route remains disabled until restoration and
+buffered response delivery are implemented; it does not call this client yet.
+
+HTTPS uses normal certificate and hostname verification. HTTP remains available
+for the configured local fake upstream; HTTP does not provide TLS. Environment
+proxies and environment TLS overrides are disabled (`trust_env=False`), and
+redirects are rejected. Only the runtime provider key supplies the optional
+Bearer header; absent keys omit Authorization, supporting the local fake and
+unauthenticated endpoints. Provider authentication failures return a static error.
+
+`upstream.timeout_s` sets connect, read, write and pool timeouts and an overall
+async deadline for sending, buffering, and validating the response. An absolute
+clock check rejects success if synchronous JSON validation runs past that deadline;
+synchronous work cannot be preempted mid-validation. Cancellation
+propagates without conversion; context exit closes the pooled HTTP client.
+The caller must retain its session through the eventual send and restoration.
+
+The retry bound is **zero retries**, or one attempt per call. No timeout,
+connection error, 429 or 5xx is retried. A failed POST can still have been accepted
+or billed, so automatic retries require a future explicit idempotency and cost
+policy. Detector/vault failures occur before client invocation, never inside a
+retry loop. No retry setting is exposed by the current client.
+
+Only HTTP 200 with a supported `ChatCompletionResponse` is accepted. Timeouts
+raise static `upstream_timeout` (504); other transport/status/response-validation
+failures raise static `upstream_error` (502). Error bodies, exception details,
+provider headers and retry hints are never returned or logged by the client.
+HTTPX/httpcore records are suppressed within client sends/close to avoid leaking
+URLs, headers or exception details even with DEBUG logging enabled. Successful
+responses remain untrusted until restoration; never log their body.
+
+Tests use ASGI and mock transports with synthetic values; no provider calls are
+needed. Injected transports are server-side test facilities, not HTTP options.

@@ -40,7 +40,13 @@ Persistent allocations are committed before this scan; ephemeral mappings stay
 in memory. Phase 4 task #3 blocks remaining accepted, non-allowlisted PII with
 422 `protection_blocked`, including PII in the model field. Otherwise the route
 still returns 503 after preparation; transport and restoration follow in later
-tasks. No upstream calls are made.
+tasks. The HTTP route makes no upstream calls.
+Phase 4 task #4 adds the separately tested async `UpstreamClient` in
+`shield/upstream.py`: verified HTTPS, configured phase and total timeouts,
+static errors, response validation, and one attempt per call (no automatic
+retries or redirects). It sends the exact guarded JSON bytes. See
+[upstream transport](docs/api-contract.md#upstream-transport) for its lifecycle
+and cost policy. Route integration awaits restoration.
 
 ## Setup with uv
 
@@ -178,7 +184,7 @@ The CLI passes settings and runtime credentials to `create_app(config, credentia
 Settings are available as `app.state.config`. Importing `shield.app:app` directly
 uses built-in settings without reading YAML or credentials; use the CLI to load
 them. Opt-in ASGI lifespan uses the configured persistence settings; detection
-and upstream HTTP timeouts are consumed by their later implementations.
+and upstream HTTP timeouts are consumed by `UpstreamClient`.
 
 The proxy enforces `server.max_request_bytes` (default **1048576 bytes**, 1 MiB)
 before JSON parsing, and `server.request_timeout_s` (default **120 seconds**) from
@@ -221,7 +227,7 @@ uv.lock                 Reproducible dependency resolution
 .python-version         Exact interpreter pin
 ```
 
-The design's `session.py`, `vault.py`, `pseudonym.py`, `upstream.py`,
+The design's `session.py`, `vault.py`, `pseudonym.py`,
 `rehydrate.py`, detector modules, and evaluation scripts will be added as their
 implementation tasks are completed.
 

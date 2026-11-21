@@ -133,3 +133,7 @@ failure messages, read-only scans, and persistent commit visibility before scann
 to verify blocking across every role and both stream settings, static errors,
 zero network sends, ephemeral cleanup, persistent lease release, model-field
 blocking, and allowlist/threshold exceptions.
+
+`test_upstream_client.py` covers exact bytes with the fake upstream, auth and URL
+construction, verified-TLS/client options, phase and total timeouts, cancellation,
+static status/transport/schema errors, zero retries/redirects, and scoped log suppression.
