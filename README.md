@@ -32,15 +32,13 @@ Phase 4 task #1 adds conversation preparation in `shield/gateway.py`, wired into
 `/v1/chat/completions`. Every system, developer, user, and assistant message is
 sanitized in the active session, including restored PII in prior assistant replies.
 Prepared requests preserve generation options and force non-streaming upstream
-mode. Client stream preferences remain on the original request for future SSE delivery.
+mode. Client stream preferences remain on the original request for buffered SSE delivery.
 Phase 4 task #2 freezes the outgoing JSON bytes after mapping registration and
 runs a read-only Stage 1 guard on every decoded string value, including `model`.
 Known session tokens are recognized; JSON escapes are decoded before detection.
 Persistent allocations are committed before this scan; ephemeral mappings stay
 in memory. Phase 4 task #3 blocks remaining accepted, non-allowlisted PII with
-422 `protection_blocked`, including PII in the model field. Otherwise the route
-still returns 503 after preparation; transport and restoration follow in later
-tasks. The HTTP route makes no upstream calls.
+422 `protection_blocked`, including PII in the model field.
 Phase 4 task #4 adds the separately tested async `UpstreamClient` in
 `shield/upstream.py`: verified HTTPS, configured phase and total timeouts,
 static errors, response validation, and one attempt per call (no automatic
@@ -50,7 +48,13 @@ and cost policy.
 Phase 4 task #5 adds `shield/rehydrate.py` for exact and deterministic formatting
 variants of known tokens, using only the active session's authenticated mappings.
 See [response restoration](docs/api-contract.md#response-restoration).
-Route integration and buffered delivery follow in task #6.
+Phase 4 task #6 connects the protected round trip. Both client modes fetch a full
+upstream completion with `stream: false`, restore content and refusal text for
+all choices, then deliver JSON or buffered SSE. SSE emits role/text deltas,
+finish-reason chunks, optional usage, and `[DONE]`, preserving IDs and choice
+indices. First-byte latency includes the full upstream completion and restoration;
+usage counts describe the tokenized exchange. Session cleanup completes before
+success headers; cancellation keeps persistent leases until HTTP cleanup drains.
 
 ## Setup with uv
 
@@ -107,7 +111,7 @@ uv run --locked python -m shield
 
 The server binds to `127.0.0.1:8000`. Open `http://127.0.0.1:8000/docs` to inspect
 the supported request schema. `/v1/chat/completions` rejects unsupported payloads
-with 400 and returns 503 for valid ephemeral requests. Requests selecting persistent sessions and all
+with 400 and forwards supported valid requests through the protection pipeline. Requests selecting persistent sessions and all
 session endpoints return 423 while the vault is locked. Enable
 `sessions.persistent_enabled: true` to collect a non-echoed startup passphrase and
 initialize or unlock the configured vault. `POST /shield/sessions` returns 201
@@ -129,7 +133,7 @@ This separate app binds to `127.0.0.1:8001`, matching the example upstream URL.
 It accepts JSON at `/v1/chat/completions`, captures exact request body bytes in
 memory, and returns a deterministic response containing `[PERSON_7K2Q]` and
 `[EMAIL_2M4R]`. It supports multiple choices via `n`; its usage counts are synthetic
-zeros. It rejects upstream `stream: true` so later tests can catch a proxy that
+zeros. It rejects upstream `stream: true` so tests can catch a proxy that
 forgets to request buffered JSON. Request bodies and authorization headers are
 not logged; headers are not captured.
 
@@ -196,7 +200,7 @@ body upload through response-header creation. Oversized bodies return 413; expir
 requests return 408. Actual bytes are counted for chunked or falsely declared
 uploads. Invalid, duplicate, or mismatched `Content-Length` values return 400.
 Limits also apply to session requests and other HTTP routes. Delivery after
-response headers is outside this deadline, including future buffered SSE.
+response headers is outside this deadline, including buffered SSE.
 The timeout cooperatively cancels async work and runs its cleanup; synchronous
 work cannot be forcibly interrupted, and late headers are rejected when it returns.
 
@@ -300,7 +304,7 @@ mappings before invoking the callback, and never calls it if commit fails. Use
 `active.read_mapping(token)` while the scope is held. Keep the scope open through
 restoration, then exit to release its key and mappings. Standalone service calls
 for that session are competing operations; they cannot reenter an active scope.
-The chat scaffold still makes no upstream calls until Phase 4.
+The chat route now uses the guarded upstream client and restores the complete response.
 
 
 ## Local analysis
@@ -328,4 +332,4 @@ create one, and send its ID in `X-Shield-Session`. Only explicit selections retu
 that header and a response session ID. Detection is local and loaded lazily on
 the first analysis request; no model is downloaded at runtime. Missing models
 produce a safe 503 while other local routes can still run. Unknown canonical
-input placeholders return 400. The protected chat route remains a 503 scaffold.
+input placeholders return 400. The protected chat route uses the same detector before forwarding.

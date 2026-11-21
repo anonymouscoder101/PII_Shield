@@ -141,3 +141,8 @@ static status/transport/schema errors, zero retries/redirects, and scoped log su
 `test_rehydrate.py` covers exact and formatting-variant restoration, Markdown and
 possessives, complete identity boundaries, Unicode lookalikes, no recursive
 replacement, active-session isolation, persistent restart recovery, and safe failures.
+
+`test_chat_roundtrip.py` exercises the full protected local round trip, multi-choice
+content/refusal restoration, JSON/SSE framing and usage, zero leaked fixture values
+in captured payloads, JSON errors before SSE headers, pre-header state cleanup,
+disconnect/cancellation, and persistent leases through fetch and cancellation drain.

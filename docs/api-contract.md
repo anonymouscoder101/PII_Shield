@@ -13,8 +13,7 @@ false, or empty containers. JSON booleans cannot be replaced with strings/intege
 parameters such as `charset=utf-8`). It validates the request and prepares all message contents within the selected
 session (or a fresh ephemeral session). Preparation runs detection, policy, and
 substitution for every supported role, including previous assistant replies.
-It still returns **503** `protection_unavailable` after successful preparation;
-the outgoing payload is serialized once after mapping registration. A final
+The outgoing payload is serialized once after mapping registration. A final
 read-only Stage 1 scan inspects every decoded JSON string value, including
 `model`, using the same threshold/allowlist policy and exact token ownership
 checks as substitution. JSON escapes cannot conceal text from this scan.
@@ -22,15 +21,17 @@ Any remaining accepted, non-allowlisted span blocks preparation with a static
 422 `protection_blocked` JSON error, including for `stream: true`. This applies
 to every scanned string value, including `model`; the guard does not rewrite
 model identifiers. Allowlisted or below-threshold detections do not block.
-No prepared payload is sent; transport and restoration are later tasks.
+After successful preparation the exact guarded bytes are sent upstream with
+`stream: false`. All supported assistant content and refusal fields in every
+choice are restored before JSON or buffered SSE delivery.
 Detector failures return 503 `detection_failed`; foreign canonical placeholders
 return 400 `invalid_request`. Selecting a persistent
 session while the vault is locked returns **423** `vault_locked`.
 `POST /shield/sessions` accepts an empty object or no body, rejects extra fields
 including credentials, and creates a reusable session only when the vault is unlocked.
-The app makes no upstream calls. Local detection/substitution are available at
-`POST /shield/analyze`; protected chat forwarding, restoration and buffered SSE
-delivery arrive in later phases. `/docs` and `/openapi.json` expose the contract.
+Local detection/substitution without upstream calls are available at
+`POST /shield/analyze`. Protected forwarding, restoration and buffered SSE are
+available at the chat endpoint. `/docs` and `/openapi.json` expose the contract.
 
 ```json
 {
@@ -106,7 +107,7 @@ not protect PII. No request forwarding is enabled by this task.
 
 ## Complete JSON response fields
 
-`ChatCompletionResponse` defines the following fields for future upstream
+`ChatCompletionResponse` defines the following fields for upstream
 validation and restored client responses. Unlisted fields are rejected, never
 silently passed through. There are no untyped passthrough objects.
 
@@ -138,7 +139,7 @@ and `choices`, plus the same optional `usage`, `system_fingerprint`, and
 string `content`, and string `refusal`. Indices are unique within each chunk.
 An empty choices array requires a non-null usage object.
 
-Phase 4 will fetch the full upstream answer with `stream: false`, restore it, and
+The proxy fetches the full upstream answer with `stream: false`, restores it, and
 then emit role/text and finish events as JSON in `data:` SSE frames. With
 `stream_options.include_usage: true`, it will also emit a final usage event with
 empty choices; other events carry null usage. Every stream ends with
@@ -173,9 +174,8 @@ All public failures use this envelope with a static message:
 | 504 | `upstream_timeout` |
 
 Validation, request limits, framework errors, locked-vault selection, and the
-unavailable pipeline are exercised by the current chat route. Other codes define
-behavior for their components; the standalone upstream client implements provider
-timeouts, pending route integration.
+protection guard and upstream errors are exercised by the current chat route.
+Provider timeouts return 504; request-budget exhaustion returns 408.
 Handlers never return validation inputs, field paths supplied by the caller,
 provider bodies, exception strings, or credentials. Unexpected HTTP exceptions
 produce a fixed log event without traceback text. If an unexpected error occurs
@@ -235,7 +235,7 @@ static 500 and do not treat edited timestamps as trusted expiry instructions.
 Deletion cascades to mappings in the same transaction. No unwrapped HMAC keys are
 cached across operations; scoped request references are released in `finally`.
 Deletion does not prevent recovery from old database copies or guarantee memory
-erasure. The current scaffold makes no upstream calls. Active requests exclusively reserve
+erasure. Active chat requests use the guarded upstream client and exclusively reserve
 their selected session; competing metadata, deletion and chat requests return
 409 `session_busy` immediately. Retry after the active request completes. Busy
 sessions are skipped by expiry pruning, with expiry enforced on the next idle
@@ -325,8 +325,8 @@ async context manager; use `await client.complete(prepared.payload)` only after
 `prepare_chat` succeeds and while its active session remains open. It sends the
 exact guarded bytes to `<upstream.base_url>/chat/completions`, preserving a custom
 base path. It does not accept downstream headers, invoke detection, open a vault,
-or own a session. The public route remains disabled until restoration and
-buffered response delivery are implemented; it does not call this client yet.
+or own a session. The public chat route calls it only after successful preparation
+and retains the active session through fetching and restoration.
 
 HTTPS uses normal certificate and hostname verification. HTTP remains available
 for the configured local fake upstream; HTTP does not provide TLS. Environment
@@ -366,7 +366,7 @@ Phase 4 task 5 adds `rehydrate_text(text, active_session)` in
 `exact_count`, `variant_count`, and their sum `restored_count`. Text is excluded
 from repr. Callers must keep the session open throughout restoration and handle
 `RehydrationError` as a failure; its message never contains source or vault text.
-Public chat integration and multi-choice/SSE delivery follow in task 6.
+Public chat integration restores all choices before JSON/SSE delivery.
 
 Exact uppercase bracketed tokens are looked up first. Remaining matches accept
 ASCII case changes, `_`, `-`, or whitespace separators, dropped square brackets,
@@ -391,3 +391,45 @@ once in source order. Inserted original values cannot trigger another restoratio
 even when an original itself contains a registered token. Unknown-token counting
 and response report headers follow in task 7. This helper does not call the
 provider, own a session, or log/store response text.
+
+## Buffered chat delivery
+
+Phase 4 task 6 connects preparation, async HTTP, restoration and delivery. Both
+client modes send a non-streaming upstream request; downstream `stream_options`
+are omitted from that payload. The active session remains held through network
+work, restoration of every choice's `message.content` and `message.refusal`, and
+serialization of the complete delivery body. Null content/refusal remains null
+in JSON; usage and choice indices are preserved.
+
+For `stream: true`, the response has `Content-Type: text/event-stream`. Each
+choice receives a `chat.completion.chunk` containing its assistant role and text
+(or refusal) delta, followed by a chunk with empty delta and its finish reason.
+The upstream completion ID, creation timestamp, model, fingerprint, service tier
+and choice indices are preserved. When requested with
+`stream_options.include_usage: true` and supplied by the provider, a final usage
+chunk has empty choices. The last frame is `data: [DONE]`.
+
+Frames use the typed chunk's JSON serializer, so newlines and quotes in IDs or
+text cannot inject SSE frames. Delivery is buffered, not live provider token
+streaming: first-byte latency includes the entire upstream answer, restoration
+and serialization. Provider usage describes tokenized prompts and responses,
+not the restored text. No body or SSE success headers are committed until this
+work succeeds. Guard, detector, vault, transport and restoration errors return
+ordinary JSON errors even if the client requested streaming. Restoration failures
+return a static 500; upstream errors/timeouts return 502/504.
+
+Worker-owned session scopes span the async fetch and restoration. HTTP runs on
+the application's event loop while the worker retains the lease. Cancellation
+or disconnect signals the worker, closes its published session state, and cancels
+the async fetch. If transport cancellation cleanup is still running, the worker
+keeps the persistent lease until the actual coroutine drains; competing session
+operations continue to return 409. Successful serialization finishes before
+session cleanup and before any response headers. Report headers and unknown-token
+counts follow in task 7.
+
+`create_app(upstream_transport=...)` is a server-side test hook for the local fake
+or an HTTPX mock transport; it is not a request/configuration field. Tests never
+need provider access. For a manual local demo, start `python -m
+shield.fake_upstream` on port 8001, then the shield on port 8000 using the default
+upstream URL. The fake's canned response contains fixed synthetic tokens; only
+actual current-session tokens are restored. Unknown fixed tokens remain visible.

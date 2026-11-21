@@ -181,6 +181,7 @@ async def test_chat_requests_get_fresh_ephemeral_state_without_disk(
 
     from shield import app as app_module
     from shield.config import ShieldConfig, VaultConfig
+    from shield.fake_upstream import create_fake_upstream
 
     states, keys = [], []
 
@@ -195,7 +196,10 @@ async def test_chat_requests_get_fresh_ephemeral_state_without_disk(
 
     monkeypatch.setattr(analysis, "ephemeral_session", capture_context)
     path = tmp_path / "not-created" / "vault.db"
-    app = app_module.create_app(ShieldConfig(vault=VaultConfig(path=path)))
+    app = app_module.create_app(
+        ShieldConfig(vault=VaultConfig(path=path)),
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream()),
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -207,7 +211,7 @@ async def test_chat_requests_get_fresh_ephemeral_state_without_disk(
                     "messages": [{"role": "user", "content": "synthetic"}],
                 },
             )
-            assert response.status_code == 503
+            assert response.status_code == 200
             assert "x-shield-session" not in response.headers
         response = await client.post(
             "/v1/chat/completions",

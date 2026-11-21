@@ -3,7 +3,8 @@
 Phase 3 task 6 adds `shield/substitute.py`. It uses the active request/session
 allocator and shared span policy. The
 [analysis HTTP endpoint](api-contract.md#local-analysis-endpoint) uses this module;
-protected upstream forwarding is a later task. This module makes no provider calls.
+the chat pipeline also uses it before protected forwarding. This module itself
+makes no provider calls.
 
 ## APIs and original coordinates
 
@@ -33,7 +34,7 @@ Replacement metadata contains the span, token, reuse flag, and skipped-collision
 count, without original values or full digests. `sanitized_text` is excluded from
 representations because unselected text can still contain sensitive information.
 Serialization intentionally includes it for local analysis responses. No claim of
-complete detection is made; the future gateway must still run its pre-send guard.
+complete detection is made; the gateway also runs its pre-send guard.
 
 ## Exact known-token preservation
 
@@ -126,7 +127,7 @@ Malformed payloads or detector failures raise static errors; unknown canonical
 tokens fail ownership checks. Phase 4 task 3 makes `prepare_chat` reject any nonzero remaining count with
 `ShieldError(PROTECTION_BLOCKED)` before returning a prepared payload. The HTTP
 route returns static JSON 422 even when SSE was requested. Successful guard
-checks still reach the 503 scaffold; no upstream requests are sent. Persistent
+checks now proceed to the async upstream client and full response restoration. Persistent
 allocations already committed before a block remain until normal session expiry
 or deletion. Worker cleanup releases the session lease on blocked requests;
 ephemeral state is discarded before returning the error.

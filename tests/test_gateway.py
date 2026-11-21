@@ -10,6 +10,7 @@ from shield.app import create_app
 from shield.config import DetectionConfig
 from shield.contracts import DetectedSpan, EntityType
 from shield.detect.resolve import SpanPolicy
+from shield.fake_upstream import create_fake_upstream
 from shield.session import ephemeral_session
 
 
@@ -80,7 +81,7 @@ def test_unknown_token_in_later_message_preflights_before_allocating():
         assert not session.mappings
 
 
-async def test_http_route_runs_detection_for_every_role_before_unavailable():
+async def test_http_route_runs_detection_for_every_role_before_forwarding():
     seen = []
 
     class RecordingDetector(Detector):
@@ -88,15 +89,17 @@ async def test_http_route_runs_detection_for_every_role_before_unavailable():
             seen.append(text)
             return super().detect(text)
 
-    app = create_app(detector_factory=lambda config: RecordingDetector())
+    app = create_app(
+        detector_factory=lambda config: RecordingDetector(),
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream()),
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as api:
         response = await api.post(
             "/v1/chat/completions", json=conversation().model_dump()
         )
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "protection_unavailable"
+    assert response.status_code == 200
     assert seen[:5] == ["Hello Alice"] * 5
     assert "synthetic-model" in seen[5:]
     for role in ("system", "developer", "user", "assistant"):

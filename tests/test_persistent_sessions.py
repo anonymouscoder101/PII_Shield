@@ -12,6 +12,7 @@ from shield.app import create_app
 from shield.config import Argon2Config, SessionsConfig, ShieldConfig, VaultConfig
 from shield.contracts import EntityType, ErrorCode, TokenMapping
 from shield.credentials import RuntimeCredentials
+from shield.fake_upstream import create_fake_upstream
 from shield.persistent import PersistentSessions, SessionAccessError, VaultStartupError
 from shield.session import ephemeral_session
 
@@ -134,7 +135,11 @@ async def test_session_endpoints_and_restart(tmp_path):
     config = ShieldConfig(
         vault=settings(tmp_path), sessions=SessionsConfig(persistent_enabled=True)
     )
-    app = create_app(config, RuntimeCredentials(vault_passphrase=PASSWORD))
+    app = create_app(
+        config,
+        RuntimeCredentials(vault_passphrase=PASSWORD),
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream()),
+    )
     async with app.router.lifespan_context(app):
         assert app.state.vault.is_unlocked
         assert app.state.credentials.vault_passphrase is None
@@ -158,9 +163,13 @@ async def test_session_endpoints_and_restart(tmp_path):
             valid = await client.post(
                 "/v1/chat/completions", json=PAYLOAD, headers={"X-Shield-Session": sid}
             )
-            assert valid.status_code == 503
+            assert valid.status_code == 200
     assert app.state.vault is None
-    app = create_app(config, RuntimeCredentials(vault_passphrase=PASSWORD))
+    app = create_app(
+        config,
+        RuntimeCredentials(vault_passphrase=PASSWORD),
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream()),
+    )
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"

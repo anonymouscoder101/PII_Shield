@@ -6,6 +6,7 @@ import pytest
 from shield.app import create_app
 from shield.config import SessionsConfig, ShieldConfig, VaultConfig
 from shield.credentials import RuntimeCredentials
+from shield.fake_upstream import create_fake_upstream
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -18,7 +19,9 @@ async def test_locked_vault_blocks_creation_and_reuse_but_not_ephemeral(
         vault=VaultConfig(path=path),
     )
     app = create_app(
-        config, RuntimeCredentials(vault_passphrase="synthetic-passphrase")
+        config,
+        RuntimeCredentials(vault_passphrase="synthetic-passphrase"),
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream()),
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -28,8 +31,7 @@ async def test_locked_vault_blocks_creation_and_reuse_but_not_ephemeral(
             "messages": [{"role": "user", "content": "Synthetic prompt"}],
         }
         ephemeral = await client.post("/v1/chat/completions", json=payload)
-        assert ephemeral.status_code == 503
-        assert ephemeral.json()["error"]["code"] == "protection_unavailable"
+        assert ephemeral.status_code == 200
         for stream in [False, True]:
             persistent = await client.post(
                 "/v1/chat/completions",
@@ -78,7 +80,7 @@ async def test_ephemeral_requests_do_not_consult_vault_readiness():
         def is_unlocked(self):
             pytest.fail("Ephemeral requests must not consult the vault")
 
-    app = create_app()
+    app = create_app(upstream_transport=httpx.ASGITransport(app=create_fake_upstream()))
     app.state.vault = UnusableVault()
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
@@ -90,5 +92,4 @@ async def test_ephemeral_requests_do_not_consult_vault_readiness():
                 "messages": [{"role": "user", "content": "Synthetic"}],
             },
         )
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "protection_unavailable"
+    assert response.status_code == 200

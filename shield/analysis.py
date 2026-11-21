@@ -5,6 +5,7 @@ from collections.abc import Callable
 from threading import Event, Lock
 
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import Response
 from starlette.types import Receive
 
 from shield.api import AnalyzeResponse, ChatCompletionRequest
@@ -72,6 +73,15 @@ class _ActiveSession:
         self._check()
         return self._state.has_token(token)
 
+    @property
+    def session_id(self):
+        self._check()
+        return self._state.session_id
+
+    def read_mapping(self, token):
+        self._check()
+        return self._state.read_mapping(token)
+
     def allocate(self, entity_type, value):
         self._check()
         return self._state.allocate(entity_type, value)
@@ -106,7 +116,9 @@ class AnalysisJob:
         if state is not None:
             state.close()
 
-    def run(self, text: str | ChatCompletionRequest) -> AnalyzeResponse | None:
+    def run(
+        self, text: str | ChatCompletionRequest
+    ) -> AnalyzeResponse | Response | None:
         if self._cancelled.is_set():
             return None
         scope = (
@@ -157,20 +169,9 @@ class AnalysisJob:
         )
 
 
-class ChatPreparationJob(AnalysisJob):
-    """Use the same worker-owned scope for chat preparation as local analysis."""
-
-    def _process(self, request, session, detector):
-        from shield.gateway import prepare_chat
-
-        prepare_chat(request, session, detector)
-        # Fail closed until transport and restoration exist.
-        raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
-
-
 async def run_analysis_job(
     job: AnalysisJob, text: str | ChatCompletionRequest, receive: Receive
-) -> AnalyzeResponse | None:
+) -> AnalyzeResponse | Response | None:
     """Stop work publication promptly on disconnect, cancellation or deadline.
 
     Cancelling the await cannot interrupt a running thread. Job cancellation

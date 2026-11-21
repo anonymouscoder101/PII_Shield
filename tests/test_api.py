@@ -15,6 +15,7 @@ from shield.api import (
 from shield.app import create_app
 from shield.contracts import ErrorCode
 from shield.errors import ERRORS, ShieldError
+from shield.fake_upstream import create_fake_upstream
 
 
 @pytest.fixture
@@ -228,17 +229,23 @@ def test_sse_contract_covers_role_content_finish_and_usage_chunks(completion):
         )
 
 
-async def test_valid_http_requests_fail_safely_until_protection_exists(payload):
+async def test_valid_http_requests_deliver_json_or_buffered_sse(payload):
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=create_app()), base_url="http://test"
+        transport=httpx.ASGITransport(
+            app=create_app(
+                upstream_transport=httpx.ASGITransport(app=create_fake_upstream())
+            )
+        ),
+        base_url="http://test",
     ) as client:
         for stream in [False, True]:
             response = await client.post(
                 "/v1/chat/completions", json=payload | {"stream": stream}
             )
-            assert response.status_code == 503
-            assert response.json()["error"]["code"] == "protection_unavailable"
-            assert response.headers["content-type"] == "application/json"
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith(
+                "text/event-stream" if stream else "application/json"
+            )
             assert "x-shield-session" not in response.headers
 
 

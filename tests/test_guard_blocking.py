@@ -12,6 +12,7 @@ from shield.app import create_app
 from shield.config import DetectionConfig
 from shield.contracts import DetectedSpan, EntityType
 from shield.detect.resolve import SpanPolicy
+from shield.fake_upstream import create_fake_upstream
 from shield.session import ephemeral_session
 
 
@@ -105,7 +106,11 @@ async def test_intentional_or_below_threshold_text_does_not_block(monkeypatch, c
     from shield.config import ShieldConfig
 
     incomplete_masking(monkeypatch)
-    app = create_app(ShieldConfig(detection=config), detector_factory=Detector)
+    app = create_app(
+        ShieldConfig(detection=config),
+        detector_factory=Detector,
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream()),
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as api:
@@ -116,8 +121,7 @@ async def test_intentional_or_below_threshold_text_does_not_block(monkeypatch, c
                 "messages": [{"role": "user", "content": "Alice"}],
             },
         )
-    assert response.status_code == 503
-    assert response.json()["error"]["code"] == "protection_unavailable"
+    assert response.status_code == 200
 
 
 async def test_unsanitized_model_is_blocked():

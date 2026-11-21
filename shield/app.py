@@ -1,14 +1,14 @@
-"""Local analysis and session routes; protected chat forwarding follows later."""
+"""Protected text-only chat, local analysis and session routes."""
 
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import Depends, FastAPI, Request, Response
 from starlette.concurrency import run_in_threadpool
 
 from shield import __version__
 from shield.analysis import (
     AnalysisJob,
-    ChatPreparationJob,
     DetectorFactory,
     DetectorProvider,
     run_analysis_job,
@@ -21,6 +21,7 @@ from shield.api import (
     SessionCreateRequest,
     SessionResponse,
 )
+from shield.chat import ChatJob
 from shield.config import ShieldConfig
 from shield.contracts import APIError, ErrorCode
 from shield.credentials import RuntimeCredentials
@@ -40,6 +41,7 @@ def create_app(
     credentials: RuntimeCredentials | None = None,
     *,
     detector_factory: DetectorFactory | None = None,
+    upstream_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
     """Create routes without I/O; opt-in vault authentication runs during lifespan."""
 
@@ -77,7 +79,7 @@ def create_app(
         title="PII Shield",
         description=(
             "Local PII analysis and optional reusable sessions. "
-            "Chat forwarding is not implemented yet."
+            "Protected chat with JSON or buffered SSE delivery."
         ),
         version=__version__,
         lifespan=lifespan,
@@ -104,7 +106,7 @@ def create_app(
         dependencies=[Depends(require_json)],
         responses={
             200: {
-                "description": "Future protected JSON or buffered SSE response.",
+                "description": "Protected JSON or buffered SSE response.",
                 "content": {
                     "text/event-stream": {
                         "schema": {"type": "string"},
@@ -129,29 +131,38 @@ def create_app(
             },
             423: {"model": APIError, "description": "Persistent vault is locked."},
             500: {"model": APIError, "description": "Internal error."},
+            502: {"model": APIError, "description": "Upstream request failed."},
+            504: {"model": APIError, "description": "Upstream request timed out."},
             503: {
                 "model": APIError,
-                "description": "Protection is not implemented yet.",
+                "description": "Local PII detection is unavailable.",
             },
         },
         description=(
-            "Validates, sanitizes and guards every supported message role. Requests "
-            "currently return 503; no upstream calls are made. Future stream=true "
-            "responses will use buffered SSE after full restoration."
+            "Sanitizes and guards all supported roles, fetches a complete upstream "
+            "response, then restores assistant text. stream=true uses buffered SSE; "
+            "upstream work and restoration finish before any success headers."
         ),
     )
     async def chat_completions(
         body: ChatCompletionRequest, request: Request
-    ) -> ChatCompletionResponse:
+    ) -> Response:
         require_session_access(request)
         session_id = request.headers.get("x-shield-session")
         service = request.app.state.vault if session_id is not None else None
-        job = ChatPreparationJob(
-            request.app.state.detector_provider, service, session_id
+        job = ChatJob(
+            request.app.state.detector_provider,
+            service,
+            session_id,
+            request.app.state.config.upstream,
+            request.app.state.credentials,
+            upstream_transport,
         )
         try:
-            await run_analysis_job(job, body, request.receive)
-            raise ShieldError(ErrorCode.REQUEST_TIMEOUT)
+            result = await run_analysis_job(job, body, request.receive)
+            if result is None:
+                raise ShieldError(ErrorCode.REQUEST_TIMEOUT)
+            return result
         finally:
             job.cancel()
 
