@@ -137,3 +137,7 @@ blocking, and allowlist/threshold exceptions.
 `test_upstream_client.py` covers exact bytes with the fake upstream, auth and URL
 construction, verified-TLS/client options, phase and total timeouts, cancellation,
 static status/transport/schema errors, zero retries/redirects, and scoped log suppression.
+
+`test_rehydrate.py` covers exact and formatting-variant restoration, Markdown and
+possessives, complete identity boundaries, Unicode lookalikes, no recursive
+replacement, active-session isolation, persistent restart recovery, and safe failures.

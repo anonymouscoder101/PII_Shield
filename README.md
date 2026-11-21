@@ -46,7 +46,11 @@ Phase 4 task #4 adds the separately tested async `UpstreamClient` in
 static errors, response validation, and one attempt per call (no automatic
 retries or redirects). It sends the exact guarded JSON bytes. See
 [upstream transport](docs/api-contract.md#upstream-transport) for its lifecycle
-and cost policy. Route integration awaits restoration.
+and cost policy.
+Phase 4 task #5 adds `shield/rehydrate.py` for exact and deterministic formatting
+variants of known tokens, using only the active session's authenticated mappings.
+See [response restoration](docs/api-contract.md#response-restoration).
+Route integration and buffered delivery follow in task #6.
 
 ## Setup with uv
 

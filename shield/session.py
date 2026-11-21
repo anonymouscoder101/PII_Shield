@@ -80,6 +80,13 @@ class EphemeralSession:
             )
             return True
 
+    def read_mapping(self, token: str) -> TokenMapping | None:
+        """Read only an exact, validated mapping owned by this open session."""
+        with self._lock:
+            if not self.has_token(token):
+                return None
+            return self.mappings[token]
+
     def allocate(
         self, entity_type: EntityType, value: SecretStr
     ) -> pseudonym.TokenAllocation:

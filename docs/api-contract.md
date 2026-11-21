@@ -358,3 +358,36 @@ responses remain untrusted until restoration; never log their body.
 
 Tests use ASGI and mock transports with synthetic values; no provider calls are
 needed. Injected transports are server-side test facilities, not HTTP options.
+
+## Response restoration
+
+Phase 4 task 5 adds `rehydrate_text(text, active_session)` in
+`shield/rehydrate.py`. It returns a `RehydrationResult` with restored `text`,
+`exact_count`, `variant_count`, and their sum `restored_count`. Text is excluded
+from repr. Callers must keep the session open throughout restoration and handle
+`RehydrationError` as a failure; its message never contains source or vault text.
+Public chat integration and multi-choice/SSE delivery follow in task 6.
+
+Exact uppercase bracketed tokens are looked up first. Remaining matches accept
+ASCII case changes, `_`, `-`, or whitespace separators, dropped square brackets,
+and line wrapping within labels or suffixes. Balanced square brackets may have
+inner whitespace; single/mismatched brackets are not repaired. Markdown wrapping
+and trailing straight/curly apostrophe possessives remain around the restored
+value. Ordinary horizontal spaces inside a suffix are not accepted, avoiding
+accidental consumption of prose following a bare token.
+
+Every candidate must resolve to a complete canonical type/suffix pair registered
+in the current session. Token metadata must agree with its type and full digest.
+The original first-observed spelling is restored; persistent reads use existing
+authenticated vault decryption. A typed exact lookup API was added to ephemeral
+sessions to provide the same session-scoped interface without SQLite access.
+Unknown pairs and pairs from another session remain unchanged. No fuzzy matching,
+Unicode lookalike correction, prefix matching, or guessed-character repair occurs.
+Bare matches require Unicode word boundaries, so token-like parts of longer
+words/identifiers are not restored.
+
+Both matching passes inspect the original response, and replacements are applied
+once in source order. Inserted original values cannot trigger another restoration,
+even when an original itself contains a registered token. Unknown-token counting
+and response report headers follow in task 7. This helper does not call the
+provider, own a session, or log/store response text.
