@@ -8,6 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from shield import __version__
 from shield.analysis import (
     AnalysisJob,
+    ChatPreparationJob,
     DetectorFactory,
     DetectorProvider,
     run_analysis_job,
@@ -31,7 +32,6 @@ from shield.errors import (
 )
 from shield.limits import RequestLimitsMiddleware
 from shield.persistent import SessionAccessError, VaultStartupError, VaultStartupHandoff
-from shield.session import ephemeral_session
 from shield.session_access import require_session_access, require_unlocked_vault
 
 
@@ -131,20 +131,25 @@ def create_app(
             },
         },
         description=(
-            "Validates the supported text-only contract. Valid requests currently "
-            "return 503; no upstream calls are made. Future stream=true responses "
-            "will use buffered SSE after full restoration."
+            "Validates and sanitizes every supported message role. Prepared requests "
+            "currently return 503; no upstream calls are made. Future stream=true "
+            "responses will use buffered SSE after full restoration."
         ),
     )
     async def chat_completions(
         body: ChatCompletionRequest, request: Request
     ) -> ChatCompletionResponse:
         require_session_access(request)
-        if "x-shield-session" not in request.headers:
-            with ephemeral_session():
-                raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
-        with request.app.state.vault.use(request.headers["x-shield-session"]):
-            raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
+        session_id = request.headers.get("x-shield-session")
+        service = request.app.state.vault if session_id is not None else None
+        job = ChatPreparationJob(
+            request.app.state.detector_provider, service, session_id
+        )
+        try:
+            await run_analysis_job(job, body, request.receive)
+            raise ShieldError(ErrorCode.REQUEST_TIMEOUT)
+        finally:
+            job.cancel()
 
     @app.post(
         "/shield/analyze",

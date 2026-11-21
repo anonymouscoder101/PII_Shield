@@ -120,3 +120,7 @@ cleanup/no vault access, explicit-session persistence/restart, safe errors,
 no-provider behavior, size/timeout limits and cancellation. Event-controlled
 workers verify lease retention while cancelled work drains, and a direct ASGI
 `http.disconnect` test verifies prompt cleanup on an actual disconnect.
+
+`test_gateway.py` covers conversation preparation across all supported roles,
+repeated/restored assistant PII, exact known tokens, whole-batch token preflight,
+separate allowlist counts, preserved options, and chat route integration.

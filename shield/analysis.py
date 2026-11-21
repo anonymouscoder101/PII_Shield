@@ -7,7 +7,7 @@ from threading import Event, Lock
 from starlette.concurrency import run_in_threadpool
 from starlette.types import Receive
 
-from shield.api import AnalyzeResponse
+from shield.api import AnalyzeResponse, ChatCompletionRequest
 from shield.config import DetectionConfig
 from shield.contracts import ErrorCode
 from shield.errors import ShieldError
@@ -106,7 +106,7 @@ class AnalysisJob:
         if state is not None:
             state.close()
 
-    def run(self, text: str) -> AnalyzeResponse | None:
+    def run(self, text: str | ChatCompletionRequest) -> AnalyzeResponse | None:
         if self._cancelled.is_set():
             return None
         scope = (
@@ -123,20 +123,11 @@ class AnalysisJob:
                 detector = self._provider.get()
                 if self._cancelled.is_set():
                     return None
-                result = sanitize_text(
+                response = self._process(
                     text, _ActiveSession(state, self._cancelled), detector
                 )
                 if self._cancelled.is_set():
                     return None
-                response = AnalyzeResponse(
-                    sanitized_text=result.sanitized_text,
-                    spans=tuple(item.span for item in result.replacements),
-                    report=result.report,
-                    preserved_token_count=result.preserved_token_count,
-                    below_threshold_count=result.below_threshold_count,
-                    preview_only=self._session_id is None,
-                    session_id=self._session_id,
-                )
             # Scope cleanup happens BEFORE the response leaves the worker.
             return response
         except Exception as exc:
@@ -153,9 +144,32 @@ class AnalysisJob:
             with self._lock:
                 self._state = None
 
+    def _process(self, text, session, detector):
+        result = sanitize_text(text, session, detector)
+        return AnalyzeResponse(
+            sanitized_text=result.sanitized_text,
+            spans=tuple(item.span for item in result.replacements),
+            report=result.report,
+            preserved_token_count=result.preserved_token_count,
+            below_threshold_count=result.below_threshold_count,
+            preview_only=self._session_id is None,
+            session_id=self._session_id,
+        )
+
+
+class ChatPreparationJob(AnalysisJob):
+    """Use the same worker-owned scope for chat preparation as local analysis."""
+
+    def _process(self, request, session, detector):
+        from shield.gateway import prepare_chat
+
+        prepare_chat(request, session, detector)
+        # Fail closed until the final guard, transport and restoration exist.
+        raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
+
 
 async def run_analysis_job(
-    job: AnalysisJob, text: str, receive: Receive
+    job: AnalysisJob, text: str | ChatCompletionRequest, receive: Receive
 ) -> AnalyzeResponse | None:
     """Stop work publication promptly on disconnect, cancellation or deadline.
 

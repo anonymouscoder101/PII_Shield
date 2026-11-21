@@ -10,8 +10,13 @@ false, or empty containers. JSON booleans cannot be replaced with strings/intege
 ## Current endpoint behavior
 
 `POST /v1/chat/completions` accepts `Content-Type: application/json` (with optional
-parameters such as `charset=utf-8`). It validates the request and returns **503**
-`protection_unavailable` for a valid ephemeral payload. Selecting a persistent
+parameters such as `charset=utf-8`). It validates the request and prepares all message contents within the selected
+session (or a fresh ephemeral session). Preparation runs detection, policy, and
+substitution for every supported role, including previous assistant replies.
+It still returns **503** `protection_unavailable` after successful preparation;
+no prepared payload is sent until the final guard and transport are implemented.
+Detector failures return 503 `detection_failed`; foreign canonical placeholders
+return 400 `invalid_request`. Selecting a persistent
 session while the vault is locked returns **423** `vault_locked`.
 `POST /shield/sessions` accepts an empty object or no body, rejects extra fields
 including credentials, and creates a reusable session only when the vault is unlocked.

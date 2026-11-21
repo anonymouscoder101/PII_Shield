@@ -191,7 +191,9 @@ async def test_chat_requests_get_fresh_ephemeral_state_without_disk(
             keys.append(state.key.get_secret_value())
             yield state
 
-    monkeypatch.setattr(app_module, "ephemeral_session", capture_context)
+    from shield import analysis
+
+    monkeypatch.setattr(analysis, "ephemeral_session", capture_context)
     path = tmp_path / "not-created" / "vault.db"
     app = app_module.create_app(ShieldConfig(vault=VaultConfig(path=path)))
     async with httpx.AsyncClient(

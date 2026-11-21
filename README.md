@@ -27,10 +27,14 @@ deterministically. Type-specific normalization, HMAC derivation, and atomic
 full-digest token allocation are available in [pseudonyms](docs/pseudonyms.md).
 [Text substitution](docs/substitution.md) preserves original offsets and exact
 registered session tokens. See [Stage 1 detection](docs/stage1-detection.md) for supported types
-and coverage limits. The proxy's `/v1/chat/completions` still returns 503 until
-the protection pipeline exists; detection is not wired into forwarding yet. Persistent requests now reserve their session through restoration;
-competing operations on that session return 409, and mapping commits precede sending.
-The proxy scaffold makes no upstream calls and provides no PII protection yet.
+and coverage limits.
+Phase 4 task #1 adds conversation preparation in `shield/gateway.py`, wired into
+`/v1/chat/completions`. Every system, developer, user, and assistant message is
+sanitized in the active session, including restored PII in prior assistant replies.
+Prepared requests preserve generation options and force non-streaming upstream
+mode. Client stream preferences remain on the original request for future SSE delivery.
+The route still returns 503 after preparation: the final guard, transport, and
+restoration are later tasks. No upstream calls are made.
 
 ## Setup with uv
 
