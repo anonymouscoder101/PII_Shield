@@ -164,7 +164,7 @@ class ChatPreparationJob(AnalysisJob):
         from shield.gateway import prepare_chat
 
         prepare_chat(request, session, detector)
-        # Fail closed until the final guard, transport and restoration exist.
+        # Fail closed until transport and restoration exist.
         raise ShieldError(ErrorCode.PROTECTION_UNAVAILABLE)
 
 

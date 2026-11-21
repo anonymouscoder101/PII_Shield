@@ -1,7 +1,7 @@
 """Prepare the supported text-only conversation within an active session.
 
 This stage performs no network I/O. It registers mappings and scans the exact
-serialized payload. Blocking and transport follow in later implementation tasks.
+serialized payload and blocks remaining accepted PII. Transport follows later.
 """
 
 from collections import Counter
@@ -9,7 +9,8 @@ from collections import Counter
 from pydantic import Field
 
 from shield.api import ChatCompletionRequest
-from shield.contracts import Contract, ProtectionReport
+from shield.contracts import Contract, ErrorCode, ProtectionReport
+from shield.errors import ShieldError
 from shield.guard import GuardReport, scan_payload
 from shield.substitute import CandidateDetector, TokenSession, sanitize_texts
 
@@ -46,6 +47,8 @@ def prepare_chat(
     )
     payload = outgoing.model_dump_json(exclude_none=True).encode("utf-8")
     guard = scan_payload(payload, session, detector)
+    if guard.remaining_count:
+        raise ShieldError(ErrorCode.PROTECTION_BLOCKED)
     return PreparedChat(
         request=outgoing,
         payload=payload,

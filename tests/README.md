@@ -128,3 +128,8 @@ separate allowlist counts, preserved options, and chat route integration.
 `test_outgoing_guard.py` covers decoded JSON string scanning (including model),
 owned placeholders, allowlist/threshold policy, immutable payload bytes, static
 failure messages, read-only scans, and persistent commit visibility before scanning.
+
+`test_guard_blocking.py` injects incomplete masking after real mapping registration
+to verify blocking across every role and both stream settings, static errors,
+zero network sends, ephemeral cleanup, persistent lease release, model-field
+blocking, and allowlist/threshold exceptions.

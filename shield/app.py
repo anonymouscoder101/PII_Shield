@@ -123,6 +123,10 @@ def create_app(
             415: {"model": APIError, "description": "Unsupported content type."},
             408: {"model": APIError, "description": "Request time budget exceeded."},
             413: {"model": APIError, "description": "Request body too large."},
+            422: {
+                "model": APIError,
+                "description": "Remaining PII was blocked by the final guard.",
+            },
             423: {"model": APIError, "description": "Persistent vault is locked."},
             500: {"model": APIError, "description": "Internal error."},
             503: {
@@ -131,7 +135,7 @@ def create_app(
             },
         },
         description=(
-            "Validates and sanitizes every supported message role. Prepared requests "
+            "Validates, sanitizes and guards every supported message role. Requests "
             "currently return 503; no upstream calls are made. Future stream=true "
             "responses will use buffered SSE after full restoration."
         ),

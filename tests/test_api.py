@@ -321,5 +321,7 @@ def test_openapi_lists_supported_fields_and_safe_validation_errors():
     responses = schema["paths"]["/v1/chat/completions"]["post"]["responses"]
     assert "400" in responses and "503" in responses
     assert "text/event-stream" in responses["200"]["content"]
-    assert "422" not in responses
+    assert responses["422"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/APIError"
+    }
     assert set(ERRORS) == set(ErrorCode)

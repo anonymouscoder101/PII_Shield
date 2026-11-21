@@ -123,5 +123,10 @@ The internal `GuardReport` contains counts of remaining accepted spans, separate
 allowlisted disclosures, and below-threshold candidates. These counts are not
 added to the original protection report, which would double-count disclosures.
 Malformed payloads or detector failures raise static errors; unknown canonical
-tokens fail ownership checks. Task 2 records findings; task 3 will enforce
-blocking. The HTTP route continues to return 503 and sends no upstream requests.
+tokens fail ownership checks. Phase 4 task 3 makes `prepare_chat` reject any nonzero remaining count with
+`ShieldError(PROTECTION_BLOCKED)` before returning a prepared payload. The HTTP
+route returns static JSON 422 even when SSE was requested. Successful guard
+checks still reach the 503 scaffold; no upstream requests are sent. Persistent
+allocations already committed before a block remain until normal session expiry
+or deletion. Worker cleanup releases the session lease on blocked requests;
+ephemeral state is discarded before returning the error.

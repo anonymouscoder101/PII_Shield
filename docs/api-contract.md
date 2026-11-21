@@ -18,7 +18,11 @@ the outgoing payload is serialized once after mapping registration. A final
 read-only Stage 1 scan inspects every decoded JSON string value, including
 `model`, using the same threshold/allowlist policy and exact token ownership
 checks as substitution. JSON escapes cannot conceal text from this scan.
-No prepared payload is sent; blocking and transport are later tasks.
+Any remaining accepted, non-allowlisted span blocks preparation with a static
+422 `protection_blocked` JSON error, including for `stream: true`. This applies
+to every scanned string value, including `model`; the guard does not rewrite
+model identifiers. Allowlisted or below-threshold detections do not block.
+No prepared payload is sent; transport and restoration are later tasks.
 Detector failures return 503 `detection_failed`; foreign canonical placeholders
 return 400 `invalid_request`. Selecting a persistent
 session while the vault is locked returns **423** `vault_locked`.

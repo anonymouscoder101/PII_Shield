@@ -108,14 +108,14 @@ def test_preparation_freezes_bytes_after_registration_and_scans_them():
 
     detector = Detector()
     request = ChatCompletionRequest.model_validate(
-        {"model": "Alice", "messages": [{"role": "user", "content": "Alice"}]}
+        {"model": "synthetic", "messages": [{"role": "user", "content": "Alice"}]}
     )
     with ephemeral_session() as state:
         prepared = prepare_chat(request, state, detector)
         body = json.loads(prepared.payload)
         token = body["messages"][0]["content"]
         assert state.has_token(token)
-        assert prepared.guard.remaining_count == 1  # model is scanned, never rewritten
+        assert prepared.guard.remaining_count == 0
         assert body["stream"] is False and "stream_options" not in body
         prepared.request.messages.clear()
         assert json.loads(prepared.payload) == body

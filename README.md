@@ -37,8 +37,10 @@ Phase 4 task #2 freezes the outgoing JSON bytes after mapping registration and
 runs a read-only Stage 1 guard on every decoded string value, including `model`.
 Known session tokens are recognized; JSON escapes are decoded before detection.
 Persistent allocations are committed before this scan; ephemeral mappings stay
-in memory. The route still returns 503 after preparation: blocking, transport,
-and restoration follow in later tasks. No upstream calls are made.
+in memory. Phase 4 task #3 blocks remaining accepted, non-allowlisted PII with
+422 `protection_blocked`, including PII in the model field. Otherwise the route
+still returns 503 after preparation; transport and restoration follow in later
+tasks. No upstream calls are made.
 
 ## Setup with uv
 
