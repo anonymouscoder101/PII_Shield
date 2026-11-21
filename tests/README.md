@@ -167,3 +167,8 @@ mocks/fake models. It covers local-only readiness, cloud/remote rejection, safe
 failure/timeout behavior, disabled tracing and environment credential forwarding,
 and DEBUG-mode fail-closed behavior. Ordinary tests never run model inference;
 use `scripts/benchmark_reviewer.py` explicitly for the synthetic local benchmark.
+
+`test_review_source_map.py` covers masked-only batch handoff, unknown-token preflight,
+review failure/cancellation, Unicode/source mapping after expansion and contraction,
+repeated/pre-existing tokens, equal-length/adjacent masks, invalid maps/bounds, and
+exclusion of raw review text from repr and serialization. It needs no Ollama service.

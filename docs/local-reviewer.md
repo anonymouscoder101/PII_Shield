@@ -1,9 +1,10 @@
 # Local contextual reviewer setup
 
 Phase 5 task 1 provides a local Ollama/LangChain adapter and a measured latency
-baseline. It does not yet connect Stage 2 to chat or change health's Stage 2
-availability flag. Masked-text routing, offset mapping, structured validation,
-merging and mode/failure-policy orchestration follow in tasks 2–6.
+baseline. Task 2 adds the masked-text handoff and source map described below.
+Neither task connects Stage 2 to chat or changes health's Stage 2 availability
+flag. Structured validation, merging and mode/failure-policy orchestration follow
+in tasks 3–6.
 
 ## Reproducible installation
 
@@ -101,3 +102,45 @@ will need explicit warm-up or a timeout decision when Stage 2 is integrated;
 this task does not silently increase the application's setting. The benchmark
 uses 60 seconds to measure cold loading. Models may unload after five minutes,
 so later calls can incur cold latency again. Longer inputs/outputs may be slower.
+
+## Masked handoff and source map
+
+Phase 5 task 2 adds `shield.detect.contextual.review_texts(texts, session,
+detector, reviewer)`. The caller owns the active session and loaded detector;
+the helper runs the existing Stage 1 detection/policy/substitution over the full
+batch before any reviewer call. Unknown canonical tokens anywhere in that batch
+fail preflight before allocation or review. Only the resulting sanitized strings,
+wrapped in `SecretStr`, are passed to `reviewer.review`. Raw originals, source
+maps, mappings and session identifiers are never reviewer arguments.
+
+The returned `ContextualReview` contains the unchanged `stage1` substitution
+result, its `source_map`, and secret `raw_output`. Raw output remains untrusted;
+no additions are accepted and no Stage 1 decision can be modified through this
+helper. Text-bearing fields are excluded from repr and model dumps. Reviewer
+failures have the static `ReviewerUnavailable` message; cancellation propagates
+and prevents remaining messages from being submitted. CPU detection is synchronous
+in this helper; later route integration must retain the established worker-owned
+session lifecycle rather than calling expensive NLP on the event loop.
+
+Every substitution result now has an internal `SourceMap`. It stores only original
+and masked character lengths and frozen, contiguous coordinate pieces. It holds
+no original text, token strings, keys or IDs and is excluded from substitution
+serialization. This extends the Phase 1 half-open Python-string span convention;
+there was no prior source-map implementation to replace. Offsets count Unicode
+code points, including combining marks, not bytes or UTF-16 units.
+
+`source_map.to_original(start, end)` returns an exact original interval only when
+the entire nonempty span lies in unchanged text. It returns `None` if the span
+intersects a generated placeholder, an input placeholder already registered in
+the session, or crosses a masked interval. Equal-length substitutions remain
+unmappable. Exact boundaries just before/after placeholders are valid. Invalid
+bounds and malformed source-map construction raise static `SourceMapError`.
+Empty inputs have an empty map. Mapping remains correct after multiple token
+expansions/contractions, repeated tokens and Unicode prefixes.
+
+This strict map is for future reviewer additions, which must refer to intact
+source text. It intentionally differs from the gateway's permissive interval
+projection used solely to reconcile partially visible allowlist disclosures.
+Task 3 must validate schema, exact text, bounds, unambiguous mapping and original
+text equality before accepting any contextual span. Public chat/analysis behavior
+and fast-mode independence remain unchanged in task 2.

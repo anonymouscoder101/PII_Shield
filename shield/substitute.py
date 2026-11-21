@@ -11,6 +11,7 @@ from pydantic import Field, SecretBytes, SecretStr
 from shield.contracts import Contract, Count, DetectedSpan, EntityType, ProtectionReport
 from shield.detect.resolve import SpanPolicy
 from shield.pseudonym import TOKEN_LABELS, TokenAllocation, validate_token_identity
+from shield.source_map import SourceMap, build_source_map
 
 _TOKEN = re.compile(
     r"\[(?:"
@@ -56,6 +57,7 @@ class SubstitutionResult(Contract):
     preserved_token_count: Count
     below_threshold_count: Count = 0
     report: ProtectionReport
+    source_map: SourceMap = Field(exclude=True)
     allowlisted_spans: tuple[DetectedSpan, ...] = Field(default=(), exclude=True)
 
 
@@ -158,6 +160,11 @@ def _apply(
     )
     return SubstitutionResult(
         sanitized_text=output,
+        source_map=build_source_map(
+            len(text),
+            [(item.span.start, item.span.end, len(item.token)) for item in replacements]
+            + [(start, end, end - start) for start, end in ranges],
+        ),
         replacements=tuple(replacements),
         preserved_token_count=len(ranges),
         below_threshold_count=below,

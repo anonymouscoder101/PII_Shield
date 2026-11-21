@@ -74,6 +74,9 @@ latency benchmark. The final adapter measured an
 the initial provisioning call took 24.85 s. It is not wired into chat yet; see
 [local reviewer setup](docs/local-reviewer.md) for installation, privacy controls,
 measurement details, and the cold-start timeout limitation.
+Phase 5 task #2 adds a Stage 1-masked reviewer handoff and exact source-coordinate
+mapping. Placeholder-overlapping spans are unmappable; raw reviewer output stays
+untrusted until task #3 validates it. This helper is not connected to chat yet.
 
 ## Setup with uv
 
