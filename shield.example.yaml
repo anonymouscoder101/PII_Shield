@@ -14,7 +14,8 @@ detection:
   employee_id_enabled: true
   employee_id_pattern: '\bEMP-\d{4,8}\b'  # Whole match must be only the identifier.
   stage2_model: llama3.1:8b
-  stage2_timeout_s: 10
+  stage2_timeout_s: 10  # Total contextual batch, including validation.
+  stage2_max_output_bytes: 65536  # Ollama response cap and aggregate review JSON budget.
   on_stage2_failure: fail_closed  # fail_closed | fail_open
   allowlist: []  # Intentional disclosures; counted separately in future reports.
 

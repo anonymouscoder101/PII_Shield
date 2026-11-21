@@ -182,3 +182,9 @@ batch-to-validation composition, and persistent CONTEXTUAL token restoration.
 overlap rejection, empty results under malicious documents, reviewer policy/removal
 commands, placeholder reclassification, and reason-text non-disclosure. The
 adapter suite checks forged chat roles stay inside one JSON document message.
+
+`test_review_policy.py` covers default closed/explicit open review failures,
+aggregate UTF-8 budgets, synchronous deadline overruns, cancellation, whole-batch
+Stage 1 fallback, and typed delivery/metrics outcomes. `test_review_transport.py`
+checks streaming byte caps despite absent/misleading lengths and compressed replies.
+The adapter suite also exercises the real SDK stream path with synthetic chunks.

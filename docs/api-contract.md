@@ -556,3 +556,16 @@ is not an end-to-end readiness or provider connectivity check. API keys,
 passphrases, model names, detection patterns/allowlists, provider URLs, database
 paths and internal exception reasons are never included. Health requests use
 the existing fixed `health` metrics category without a protection report.
+
+## Contextual-review outcome hooks
+
+Phase 5 task 5 adds optional typed Stage 2 outcomes to delivery and metrics;
+public chat mode integration follows in task 6. A delivery with an explicit
+successful outcome adds `X-Shield-Stage2: complete`. An explicitly configured
+fail-open outcome adds `X-Shield-Stage2: stage1_fallback` plus
+`X-Shield-Stage2-Failure: timeout|output_limit|invalid_output|unavailable`.
+Both JSON and SSE support these headers. A failed outcome cannot produce success
+headers and raises 503 `reviewer_unavailable`. Metrics may include the same
+`stage2` object; it contains only fixed status/failure categories. Existing Stage 1
+requests have no outcome headers/metric field until review is requested.
+See [bounded local review](local-reviewer.md#bounded-review-and-failure-policy).

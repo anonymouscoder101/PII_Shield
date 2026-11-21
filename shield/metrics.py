@@ -9,7 +9,7 @@ from time import monotonic
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from shield.contracts import ErrorCode, ProtectionReport
+from shield.contracts import ErrorCode, ProtectionReport, Stage2Outcome
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 class _RequestMetrics:
     error_code: ErrorCode | None = None
     report: dict | None = None
+    stage2: dict | None = None
 
 
 _current: ContextVar[_RequestMetrics | None] = ContextVar(
@@ -48,6 +49,18 @@ def record_protection(report: ProtectionReport) -> None:
     current = _current.get()
     if current is not None:
         current.report = snapshot
+
+
+def record_stage2(outcome: Stage2Outcome) -> None:
+    try:
+        snapshot = Stage2Outcome(
+            status=outcome.status, failure=outcome.failure
+        ).model_dump(mode="json")
+    except Exception:
+        raise ValueError("Invalid metrics data.") from None
+    current = _current.get()
+    if current is not None:
+        current.stage2 = snapshot
 
 
 def _endpoint(path: str) -> str:
@@ -124,6 +137,8 @@ class MetricsMiddleware:
             }
             if status == 200 and outcome == "success" and current.report is not None:
                 event["report"] = current.report
+            if current.stage2 is not None:
+                event["stage2"] = current.stage2
             try:
                 logger.info(json.dumps(event, separators=(",", ":")))
             except Exception:

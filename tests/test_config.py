@@ -38,6 +38,7 @@ def test_example_loads_without_credentials_or_model_dependencies():
     config = load_config(Path(__file__).resolve().parents[1] / "shield.example.yaml")
     assert config.detection.mode == "balanced"
     assert config.detection.on_stage2_failure == "fail_closed"
+    assert config.detection.stage2_max_output_bytes == 65536
     assert config.vault.argon2.memory_kib == 65536
     assert config.upstream.api_key_env == "UPSTREAM_API_KEY"
     assert create_app(config).state.config is config
@@ -134,6 +135,14 @@ def test_default_file_is_loaded_and_relative_vault_path_uses_its_directory(
         ("detection: {allowlist: [42]}", "detection.allowlist"),
         ("detection: {allowlist: 'Synthetic Organization'}", "detection.allowlist"),
         ("detection: {stage2_timeout_s: -1}", "detection.stage2_timeout_s"),
+        (
+            "detection: {stage2_max_output_bytes: 0}",
+            "detection.stage2_max_output_bytes",
+        ),
+        (
+            "detection: {stage2_max_output_bytes: true}",
+            "detection.stage2_max_output_bytes",
+        ),
         ("detection: {on_stage2_failure: ignore}", "detection.on_stage2_failure"),
         ("vault: {path: ''}", "vault.path"),
         ("vault: {session_ttl_hours: 0}", "vault.session_ttl_hours"),

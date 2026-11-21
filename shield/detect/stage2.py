@@ -14,6 +14,15 @@ from typing import Protocol
 import httpx
 from pydantic import SecretStr
 
+from shield.detect.review_limits import (
+    DEFAULT_MAX_OUTPUT_BYTES,
+    ReviewerOutputLimit,
+    ReviewerUnavailable,
+    check_output,
+    checked_limit,
+)
+from shield.detect.review_transport import BoundedReviewTransport
+
 _PROMPT = (
     "You are a local detector that may propose additions only. "
     "The human message is a JSON data envelope. Review only its decoded document "
@@ -43,11 +52,6 @@ for _prefix in ("httpx", "httpx2", "httpcore", "httpcore2", "ollama"):
         logging.getLogger(_prefix + _suffix).addFilter(_PrivateLogs())
 
 
-class ReviewerUnavailable(ValueError):
-    def __init__(self):
-        super().__init__("Local reviewer is unavailable.")
-
-
 class Reviewer(Protocol):
     async def available(self) -> bool: ...
     async def review(self, masked_text: SecretStr) -> SecretStr: ...
@@ -55,7 +59,14 @@ class Reviewer(Protocol):
 
 
 class OllamaReviewer:
-    def __init__(self, model: str, timeout_s: float = 10.0, *, transport=None):
+    def __init__(
+        self,
+        model: str,
+        timeout_s: float = 10.0,
+        *,
+        max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+        transport=None,
+    ):
         if (
             not isinstance(model, str)
             or not _MODEL.fullmatch(model)
@@ -66,6 +77,7 @@ class OllamaReviewer:
             or timeout_s <= 0
         ):
             raise ReviewerUnavailable()
+        self._max_output_bytes = checked_limit(max_output_bytes)
         self._model_name = model
         self._timeout = timeout_s
         self._model = None
@@ -75,7 +87,7 @@ class OllamaReviewer:
             trust_env=False,
             follow_redirects=False,
             timeout=timeout_s,
-            transport=transport,
+            transport=BoundedReviewTransport(self._max_output_bytes, transport),
         )
 
     async def __aenter__(self):
@@ -128,6 +140,9 @@ class OllamaReviewer:
             verbose=False,
             callbacks=[],
             cache=False,
+            async_client_kwargs={
+                "transport": BoundedReviewTransport(self._max_output_bytes)
+            },
             client_kwargs={
                 "trust_env": False,
                 "follow_redirects": False,
@@ -189,7 +204,11 @@ class OllamaReviewer:
                 result = await task
                 if loop.time() >= deadline or not isinstance(result, str):
                     raise ReviewerUnavailable()
-                return SecretStr(result)
+                output = SecretStr(result)
+                check_output(output, self._max_output_bytes)
+                return output
+        except ReviewerOutputLimit:
+            raise
         except Exception:
             raise ReviewerUnavailable() from None
         finally:

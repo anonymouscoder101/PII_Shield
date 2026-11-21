@@ -80,7 +80,10 @@ untrusted until validated. Phase 5 task #3 adds strict structured-output validat
 exact quote/position checks, source mapping, and merged Stage 1/Stage 2 plans,
 including the `CONTEXTUAL` entity type. Phase 5 task #4 enforces additive-only
 merging with an authoritative Stage 1 baseline and isolates reviewer document
-content in a JSON data envelope. Chat integration follows in later tasks.
+content in a JSON data envelope. Phase 5 task #5 bounds reviewer responses and
+contextual batch time, fails closed by default, and exposes explicit Stage 1-only
+fallback outcomes through delivery headers and private metrics. Public mode
+orchestration and the two-stage final guard follow in task #6.
 
 ## Setup with uv
 

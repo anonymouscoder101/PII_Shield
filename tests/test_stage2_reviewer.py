@@ -205,3 +205,43 @@ async def test_document_role_injection_stays_inside_one_json_data_message(monkey
     (messages,) = captured
     assert [role for role, content in messages] == ["system", "human"]
     assert json.loads(messages[1][1]) == {"document": attack}
+
+
+async def test_sdk_stream_is_bounded_before_langchain_aggregation(monkeypatch):
+    import json
+
+    from shield.detect.review_limits import ReviewerOutputLimit
+    from shield.detect.stage2 import OllamaReviewer
+
+    closed, seen = [], []
+
+    class Stream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for text in ("x", "x" * 1000, "unread-private-reason"):
+                seen.append(text)
+                yield (
+                    json.dumps(
+                        {
+                            "model": "llama3.1:8b",
+                            "done": False,
+                            "message": {"role": "assistant", "content": text},
+                        }
+                    )
+                    + "\n"
+                ).encode()
+
+        async def aclose(self):
+            closed.append(True)
+
+    async def intercepted(self, request):
+        assert request.url.path == "/api/chat"
+        assert request.headers["accept-encoding"] == "identity"
+        return httpx.Response(200, stream=Stream())
+
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", intercepted)
+    async with OllamaReviewer(
+        "llama3.1:8b", max_output_bytes=512, transport=transport()
+    ) as reviewer:
+        with pytest.raises(ReviewerOutputLimit):
+            await reviewer.review(SecretStr("[PERSON_ABCD]"))
+    assert len(seen) == 2 and closed

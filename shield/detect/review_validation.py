@@ -9,6 +9,11 @@ from pydantic import Field, SecretStr
 from shield.contracts import Contract, Count, DetectedSpan, DetectionStage, EntityType
 from shield.detect.contextual import ContextualReview
 from shield.detect.resolve import ResolvedDetections, SpanPolicy, _merge, _report
+from shield.detect.review_limits import (
+    DEFAULT_MAX_OUTPUT_BYTES,
+    ReviewerOutputLimit,
+    check_output,
+)
 from shield.source_map import SourceMap, SourceMapError
 
 
@@ -91,7 +96,11 @@ def merge_additions(
 
 
 def validate_review(
-    original_text: SecretStr, review: ContextualReview, policy: SpanPolicy
+    original_text: SecretStr,
+    review: ContextualReview,
+    policy: SpanPolicy,
+    *,
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
 ) -> ValidatedReview:
     """Schema failure aborts review; invalid/ambiguous individual ranges discard.
 
@@ -121,7 +130,7 @@ def validate_review(
                 != masked[piece.masked_start : piece.masked_end]
             ):
                 raise ReviewerOutputError()
-        raw = review.raw_output.get_secret_value()
+        raw = check_output(review.raw_output, max_output_bytes)
         # The JSON parser rejects duplicate keys and nonstandard numeric constants;
         # JSON-mode Pydantic validation preserves strict enum/string semantics.
         json.loads(raw, object_pairs_hook=_pairs, parse_constant=_constant)
@@ -165,5 +174,7 @@ def validate_review(
                 report=_report(merged, allowed),
             ),
         )
+    except ReviewerOutputLimit:
+        raise
     except Exception:
         raise ReviewerOutputError() from None

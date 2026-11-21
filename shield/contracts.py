@@ -7,7 +7,7 @@ No contract performs detection, token generation, encryption, or session cleanup
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     AwareDatetime,
@@ -206,3 +206,16 @@ class APIError(Contract):
     """JSON error envelope, independent of HTTP exception handling."""
 
     error: APIErrorDetail
+
+
+class Stage2Outcome(Contract):
+    status: Literal["complete", "stage1_fallback", "failed"]
+    failure: (
+        Literal["timeout", "output_limit", "invalid_output", "unavailable"] | None
+    ) = None
+
+    @model_validator(mode="after")
+    def consistent_outcome(self):
+        if (self.status == "complete") != (self.failure is None):
+            raise ValueError("Invalid Stage 2 outcome.")
+        return self

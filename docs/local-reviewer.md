@@ -5,7 +5,8 @@ baseline. Task 2 adds the masked-text handoff and source map described below.
 Neither task connects Stage 2 to chat or changes health's Stage 2 availability
 flag. Task 3 adds structured validation and merged coordinate plans, and task 4
 adds an enforced additive merge and adversarial document/reviewer checks.
-Mode/failure-policy orchestration follows in tasks 5–6.
+Task 5 adds bounded failure-policy orchestration and outcome reporting. Public
+mode integration and final guard orchestration follow in task 6.
 
 ## Reproducible installation
 
@@ -71,9 +72,9 @@ warm a model or guarantee subsequent inference. Review uses temperature 0, seed 
 keep-alive. A total async deadline and client timeouts apply; exceptions become
 `ReviewerUnavailable` with a static message. Cancellation propagates. Context exit
 closes both LangChain-owned Ollama clients (via tested, pinned SDK internals).
-The task 3 validation layer enforces schema/offset checks. Bounded output size and
-application failure-policy integration remain task 5 work; raw adapter results
-must never be used directly for redaction.
+The validation layer enforces schema/offset checks and a default output-byte cap.
+Task 5 adds bounded transport and failure-policy handling below. Raw adapter
+results must never be used directly for redaction.
 
 ## Measured baseline: 2026-11-21
 
@@ -227,3 +228,57 @@ not claims about a particular model's behavior against every injection. The
 latency artifacts above describe the earlier task 1 prompt; rerun the benchmark
 if measurements for this hardened prompt/envelope are needed. No model calls are
 made by these tests. Public chat integration remains for task 6.
+
+## Bounded review and failure policy
+
+Phase 5 task 5 adds `review_with_policy(texts, session, detector, reviewer, config)`
+in `shield.detect.review_policy`. It returns `ReviewBatch` with Stage 1 results,
+validated coordinate plans, and a typed `Stage2Outcome`. This is the entry point
+for later Stage 2 mode orchestration. The existing HTTP chat path remains Stage 1
+until task 6 connects both stages and the final guard.
+
+`detection.stage2_max_output_bytes` defaults to **65536** (strict positive integer).
+Pass this value to `OllamaReviewer(max_output_bytes=...)` too. The adapter bounds
+preflight metadata and inference response streams before the Ollama SDK/LangChain
+can accumulate them. It requests identity encoding and rejects compressed bodies,
+counts actual bytes even without a truthful Content-Length, and closes a stream
+on a limit violation. This cap includes NDJSON protocol overhead, not just model
+text. The 256-token generation setting is additional, not a substitute for this
+transport cap. The validator checks UTF-8 size before JSON parsing. Policy also
+limits the aggregate JSON text bytes across all messages; character count alone
+is insufficient for Unicode text.
+
+`stage2_timeout_s` bounds the entire contextual batch, including validation,
+after Stage 1 sanitization. Both async cancellation deadlines and absolute clock
+checks prevent late synchronous validation from publishing success. The adapter
+retains its per-call timeout. These are cooperative limits, not preemption of
+synchronous work or proof that the daemon immediately stopped generation.
+
+On any contextual outage, timeout, size violation or invalid schema:
+
+- Default `on_stage2_failure: fail_closed` records a typed failed outcome and raises
+  the static 503 `reviewer_unavailable` category before any provider continuation.
+- Explicit `fail_open` discards **all** partial contextual additions and returns
+  Stage 1-only plans for the whole batch. It never mixes successful earlier Stage 2
+  messages with fallback messages while claiming Stage 1-only behavior.
+
+Stage 1/detector/storage failures are outside this fallback path. Lost session
+state, guard/session errors and caller cancellation cannot become successful
+fail-open continuation. The caller still owns session lifetime and must run the
+final guard before forwarding fallback payloads.
+
+Delivery accepts the batch outcome via `completion_response(..., stage2=outcome)`.
+Successful JSON and SSE responses receive `X-Shield-Stage2: complete` or
+`X-Shield-Stage2: stage1_fallback`. Fallback additionally returns
+`X-Shield-Stage2-Failure` with one fixed category: `timeout`, `output_limit`,
+`invalid_output`, or `unavailable`. Failed outcomes cannot be passed off as success;
+they raise the static reviewer error and do not emit success/report headers.
+Metrics record the same typed `stage2` status/failure object, including failures,
+without reviewer text or exception details. Requests that never attempt review
+retain their existing headers and metrics (no Stage 2 outcome field).
+
+The policy and delivery primitives are tested together using controlled local
+routes and fake reviewers, including JSON/SSE error boundaries. They are not yet
+wired to public mode selection. In task 6, callers must select review only in
+Stage 2 modes, pass the configured adapter limits, preserve the worker-owned
+session lifecycle, apply merged plans, and run the final outgoing guard.

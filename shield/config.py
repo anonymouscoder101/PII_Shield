@@ -77,6 +77,7 @@ class DetectionConfig(Contract):
 
     stage2_model: NonBlankString = "llama3.1:8b"
     stage2_timeout_s: PositiveDuration = 10.0
+    stage2_max_output_bytes: Annotated[int, Field(ge=1)] = 65536
     on_stage2_failure: Literal["fail_closed", "fail_open"] = "fail_closed"
 
     @property

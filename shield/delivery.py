@@ -9,8 +9,9 @@ from shield.api import (
     ChunkChoice,
     CompletionDelta,
 )
-from shield.contracts import Contract, Count, ProtectionReport
-from shield.metrics import record_protection
+from shield.contracts import Contract, Count, ErrorCode, ProtectionReport, Stage2Outcome
+from shield.errors import ShieldError
+from shield.metrics import record_protection, record_stage2
 from shield.rehydrate import MappingReader, rehydrate_text
 
 
@@ -51,10 +52,19 @@ def completion_response(
     include_usage: bool,
     report: ProtectionReport,
     session_id: str | None = None,
+    stage2: Stage2Outcome | None = None,
 ) -> Response:
     """Construct the entire delivery body before committing any response headers."""
+    if stage2 is not None:
+        record_stage2(stage2)
+        if stage2.status == "failed":
+            raise ShieldError(ErrorCode.REVIEWER_UNAVAILABLE)
     record_protection(report)
     headers = {"Cache-Control": "no-store", "X-Shield-Report": report.model_dump_json()}
+    if stage2 is not None:
+        headers["X-Shield-Stage2"] = stage2.status
+        if stage2.failure is not None:
+            headers["X-Shield-Stage2-Failure"] = stage2.failure
     if session_id is not None:
         headers["X-Shield-Session"] = session_id
     if not stream:
