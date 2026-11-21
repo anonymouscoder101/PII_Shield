@@ -151,3 +151,8 @@ Phase 4 task 7 extends restoration/round-trip coverage with unknown occurrence
 counting, no double counting or scanning inserted originals, count-only report
 headers, final-scan disclosure counts including model, and selected-session headers
 for JSON/SSE success with header omission on errors.
+
+`test_metrics.py` verifies count-only structured events, fixed endpoint categories,
+static errors including upload/late failures, cancellation/limits, concurrent
+isolation, validation of telemetry data, and seeded provider/body/credential/reviewer
+text exclusion at DEBUG. The CLI configuration test checks disabled access logs.

@@ -10,6 +10,7 @@ from shield.api import (
     CompletionDelta,
 )
 from shield.contracts import Contract, Count, ProtectionReport
+from shield.metrics import record_protection
 from shield.rehydrate import MappingReader, rehydrate_text
 
 
@@ -52,6 +53,7 @@ def completion_response(
     session_id: str | None = None,
 ) -> Response:
     """Construct the entire delivery body before committing any response headers."""
+    record_protection(report)
     headers = {"Cache-Control": "no-store", "X-Shield-Report": report.model_dump_json()}
     if session_id is not None:
         headers["X-Shield-Session"] = session_id

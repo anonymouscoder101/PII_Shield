@@ -201,7 +201,12 @@ def test_cli_passes_configured_port_and_settings_to_server(tmp_path, monkeypatch
     )
     main()
     ((args, kwargs),) = calls
-    assert kwargs == {"host": "127.0.0.1", "port": 8123}
+    assert kwargs == {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "access_log": False,
+        "log_level": "info",
+    }
     assert args[0].state.config.detection.effective_threshold == 0.6
 
 

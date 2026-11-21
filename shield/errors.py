@@ -9,6 +9,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from shield.contracts import APIError, APIErrorDetail, ErrorCode
+from shield.metrics import record_error
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class ShieldError(Exception):
 
 
 def error_response(code: ErrorCode) -> JSONResponse:
+    record_error(code)
     status, message = ERRORS[code]
     error = APIError(error=APIErrorDetail(code=code, message=message))
     return JSONResponse(status_code=status, content=error.model_dump(mode="json"))
@@ -129,6 +131,7 @@ class SafeExceptionMiddleware:
             await self.app(scope, receive, track_send)
         except Exception:
             # Never attach exc_info or exception strings: both can contain PII.
+            record_error(ErrorCode.INTERNAL_ERROR)
             logger.error("request_failed code=internal_error")
             if not started:
                 await error_response(ErrorCode.INTERNAL_ERROR)(scope, receive, send)

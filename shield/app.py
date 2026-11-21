@@ -32,6 +32,7 @@ from shield.errors import (
     require_json,
 )
 from shield.limits import RequestLimitsMiddleware
+from shield.metrics import MetricsMiddleware, record_protection
 from shield.persistent import SessionAccessError, VaultStartupError, VaultStartupHandoff
 from shield.session_access import require_session_access, require_unlocked_vault
 
@@ -92,13 +93,14 @@ def create_app(
         app.state.config.detection, detector_factory
     )
     app.state.vault = None  # Authenticated service is installed only during lifespan.
-    install_error_handlers(app)
 
     @app.exception_handler(SessionAccessError)
     async def session_error(request: Request, exc: SessionAccessError):
         return error_response(exc.code)
 
     app.add_middleware(RequestLimitsMiddleware, config=app.state.config.server)
+    install_error_handlers(app)
+    app.add_middleware(MetricsMiddleware)
 
     @app.post(
         "/v1/chat/completions",
@@ -190,6 +192,7 @@ def create_app(
                 raise ShieldError(ErrorCode.REQUEST_TIMEOUT)
         finally:
             job.cancel()
+        record_protection(result.report)
         response.headers["Cache-Control"] = "no-store"
         if session_id is not None:
             response.headers["X-Shield-Session"] = session_id

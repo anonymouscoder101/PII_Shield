@@ -60,6 +60,10 @@ allowlisted-disclosure counts, and unknown response-token counts. Unknown tokens
 stay unchanged; `X-Shield-Session` is returned only for an explicitly selected
 persistent session. Both JSON and SSE are fully restored and serialized before
 ephemeral state is released.
+Phase 4 task #8 adds structured, count-only request metrics and safe exception
+coverage for uploads and response delivery. The CLI disables access logs and
+emits JSON telemetry without URLs, session IDs, credentials, bodies, or reviewer
+reasons. See [private metrics and logging](docs/api-contract.md#private-metrics-and-logging).
 
 ## Setup with uv
 

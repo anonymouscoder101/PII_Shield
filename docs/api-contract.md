@@ -472,3 +472,50 @@ explicitly selected a valid persistent session. Ephemeral requests never receive
 an internal ID. Errors do not return chat report or session headers. All headers
 are constructed after complete restoration and serialization; ephemeral cleanup
 finishes before success headers are emitted, including for SSE.
+
+## Private metrics and logging
+
+Phase 4 task 8 adds `shield/metrics.py`. The CLI emits one JSON `request_finished`
+event through the `shield.metrics` logger at INFO after each HTTP request ends.
+When embedding `create_app`, configure this logger at INFO with your host's log
+handler to collect events. Metrics do not open files or contact an exporter.
+Non-HTTP lifespan events are not request metrics.
+
+Each event contains only these fields:
+
+- `event`: fixed `request_finished`.
+- `endpoint`: fixed `chat`, `analyze`, `health`, `sessions`, or `other` category.
+- `status`: actual HTTP status once headers start, or null before headers.
+- `outcome`: `success`, `error`, `cancelled`, or `disconnected`.
+- `duration_ms`: elapsed monotonic time through delivery/cancellation.
+- `error_code`: an approved `ErrorCode`, or null.
+- `report`: the typed protection report, only for successful chat/analysis requests.
+
+Reports contain protected, intentionally disclosed and unknown-token occurrence
+counts. Failed or abandoned requests do not publish partial protection reports.
+An exception after 200 headers is recorded as an error with status 200, since
+already sent headers cannot be changed. Cancellation is recorded promptly even
+when a worker retains its lease while draining; it never emits a second event.
+
+Request-local context propagates into processing workers and async upstream
+work. Concurrent requests have independent accumulators. Error codes accept only
+the enum; protection reports are reconstructed from explicit fields and validated
+before a plain count snapshot is retained. Free-text values, tokens, digests,
+request IDs, session IDs, model names, URLs, headers, input/output bodies,
+exception details, provider error bodies and reviewer reasons have no metrics
+fields. The logger receives JSON serialized from this fixed schema, with no
+exception traceback attached. A failed metrics sink does not replace a response.
+
+The supported CLI starts Uvicorn at INFO with `access_log=False`; access logs can
+otherwise expose sensitive URLs, queries and session identifiers. No body logging
+middleware is installed. HTTPX/httpcore logs stay suppressed during provider
+sends/cleanup, and Presidio source-word logging is disabled during detection.
+If embedding the app in another server, disable that server's access/body/TRACE
+logging too: application middleware cannot control host logs emitted outside it.
+
+Static exception handling surrounds request limits as well as routes, covering
+upload failures and errors during response delivery without exposing exception
+strings. Upstream failures remain fixed 502/504 errors; unsupported input remains
+400; detector/vault failures never become upstream retries. No reviewer component
+is installed yet, and no storage or logging API accepts its free-text reasons.
+Future reviewer integration must reduce failures to approved codes and counts.

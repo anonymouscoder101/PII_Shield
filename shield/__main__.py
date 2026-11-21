@@ -1,6 +1,7 @@
 """Start the localhost scaffold with validated configuration."""
 
 import argparse
+import logging
 from pathlib import Path
 
 import uvicorn
@@ -26,10 +27,13 @@ def main() -> None:
         parser.exit(130, "Startup cancelled.\n")
     app = create_app(config, credentials)
     del credentials  # Lifespan owns the startup reference until authentication.
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     uvicorn.run(
         app,
         host=config.server.host,
         port=config.server.port,
+        access_log=False,
+        log_level="info",
     )
 
 
