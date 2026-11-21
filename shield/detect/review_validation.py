@@ -1,6 +1,7 @@
 """Validate untrusted local JSON and merge additions in original coordinates."""
 
 import json
+from itertools import pairwise
 from typing import Annotated
 
 from pydantic import Field, SecretStr
@@ -46,6 +47,47 @@ def _pairs(items):
 
 def _constant(value):
     raise ReviewerOutputError()
+
+
+def merge_additions(
+    stage1: tuple[DetectedSpan, ...], additions: tuple[DetectedSpan, ...]
+) -> tuple[DetectedSpan, ...]:
+    """Keep the accepted baseline authoritative; reviewer spans can only add.
+
+    Never merge across a Stage 1 boundary or change its metadata. Placeholder
+    validation normally prevents overlaps; reject them here independently too.
+    """
+    try:
+
+        def checked(spans, stage):
+            values = []
+            for span in spans:
+                if not isinstance(span, DetectedSpan) or span.stage != stage:
+                    raise ReviewerOutputError()
+                values.append(
+                    DetectedSpan(
+                        start=span.start,
+                        end=span.end,
+                        entity_type=span.entity_type,
+                        confidence=span.confidence,
+                        stage=span.stage,
+                    )
+                )
+            return tuple(sorted(values, key=lambda item: (item.start, item.end)))
+
+        baseline = checked(stage1, DetectionStage.STAGE_1)
+        if any(left.end > right.start for left, right in pairwise(baseline)):
+            raise ReviewerOutputError()
+        extra = _merge(list(checked(additions, DetectionStage.STAGE_2)))
+        index = 0
+        for span in extra:
+            while index < len(baseline) and baseline[index].end <= span.start:
+                index += 1
+            if index < len(baseline) and baseline[index].start < span.end:
+                raise ReviewerOutputError()
+        return tuple(sorted(baseline + extra, key=lambda item: (item.start, item.end)))
+    except Exception:
+        raise ReviewerOutputError() from None
 
 
 def validate_review(
@@ -110,7 +152,7 @@ def validate_review(
             )
         contextual = policy.resolve(original, mapped)
         baseline = tuple(item.span for item in first.replacements)
-        merged = _merge(list(baseline + contextual.spans))
+        merged = merge_additions(baseline, contextual.spans)
         allowed = first.allowlisted_spans + contextual.allowlisted_spans
         return ValidatedReview(
             additions=contextual.spans,

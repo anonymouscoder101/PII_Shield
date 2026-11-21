@@ -3,8 +3,9 @@
 Phase 5 task 1 provides a local Ollama/LangChain adapter and a measured latency
 baseline. Task 2 adds the masked-text handoff and source map described below.
 Neither task connects Stage 2 to chat or changes health's Stage 2 availability
-flag. Task 3 adds structured validation and merged coordinate plans. Adversarial
-review checks and mode/failure-policy orchestration follow in tasks 4–6.
+flag. Task 3 adds structured validation and merged coordinate plans, and task 4
+adds an enforced additive merge and adversarial document/reviewer checks.
+Mode/failure-policy orchestration follows in tasks 5–6.
 
 ## Reproducible installation
 
@@ -190,3 +191,39 @@ The `CONTEXTUAL` type has its own token label, text normalization and HMAC domai
 so later substitution can use the existing session/vault machinery. Stage 1's
 recognizer registry remains unchanged. Public mode routing, second-stage masking,
 final guard orchestration and failure-policy behavior follow in later tasks.
+
+## Additive-only review and instruction boundaries
+
+Phase 5 task 4 makes `merge_additions(stage1, additions)` the merge boundary.
+It validates provenance (Stage 1 baseline, Stage 2 additions) and rejects overlap
+with the authoritative baseline independently of the source map. Only Stage 2
+spans are merged with one another; baseline spans keep their exact coordinates,
+entity type, confidence and stage. Adjacent additions do not expand a baseline
+span. Empty reviewer output leaves the baseline intact. A changed threshold or
+allowlist applies to proposed additions only, never to accepted Stage 1 spans.
+Malformed or overlapping merge inputs fail with the static `ReviewerOutputError`.
+
+The Ollama adapter sends exactly two messages: the fixed system policy and one
+human data message serialized as `{"document": "...masked text..."}`. Quotes,
+newlines, forged chat-role arrays and closing delimiters in the document remain
+inside that JSON string. The system policy specifies that offsets and quotes
+refer to the decoded `document` value, not JSON escape bytes or the outer envelope.
+It asks only for additions and explicitly forbids treating document instructions
+as changes to roles, thresholds, output format or existing placeholders.
+
+Safety does not depend on the model obeying that prompt. Reviewer JSON cannot
+set policies or replace Stage 1 lists: unknown control fields fail the strict
+schema, and candidates over/through placeholders fail exact source mapping.
+Reasons are data, never evaluated instructions. In-range additions still require
+exact masked/original text equality and the configured confidence/allowlist checks.
+A model can miss contextual PII or propose unnecessary additions; this boundary
+guarantees preservation of Stage 1 rather than perfect Stage 2 detection.
+
+Offline adversarial tests exercise empty responses to malicious documents,
+reviewer removal/allowlist/threshold commands, high-confidence placeholder
+reclassification, cross-placeholder proposals, and role-delimiter injection in
+the actual adapter's message construction. They verify application invariants,
+not claims about a particular model's behavior against every injection. The
+latency artifacts above describe the earlier task 1 prompt; rerun the benchmark
+if measurements for this hardened prompt/envelope are needed. No model calls are
+made by these tests. Public chat integration remains for task 6.

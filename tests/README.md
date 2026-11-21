@@ -177,3 +177,8 @@ exclusion of raw review text from repr and serialization. It needs no Ollama ser
 positions, original-snapshot checks, Unicode/length-changing maps, placeholder and
 cross-placeholder rejection, shared threshold/allowlist/overlap behavior, masked
 batch-to-validation composition, and persistent CONTEXTUAL token restoration.
+
+`test_review_injection.py` exercises additive merge preservation, provenance and
+overlap rejection, empty results under malicious documents, reviewer policy/removal
+commands, placeholder reclassification, and reason-text non-disclosure. The
+adapter suite checks forged chat roles stay inside one JSON document message.
