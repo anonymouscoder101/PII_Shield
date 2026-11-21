@@ -50,3 +50,20 @@ async def review_texts(
             )
         )
     return tuple(reviewed)
+
+
+async def review_and_resolve_texts(
+    texts: Iterable[str],
+    session: TokenSession,
+    detector: CandidateDetector,
+    reviewer: Reviewer,
+):
+    """Return validated merged plans; application routing/substitution follow later."""
+    from shield.detect.review_validation import validate_review
+
+    sources = tuple(texts)
+    reviews = await review_texts(sources, session, detector, reviewer)
+    return tuple(
+        validate_review(SecretStr(original), review, detector.policy)
+        for original, review in zip(sources, reviews, strict=True)
+    )

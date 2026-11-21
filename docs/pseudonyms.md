@@ -11,7 +11,7 @@ Allocation uses the selected session store, as described below.
 
 | Detector type | Normalization |
 | --- | --- |
-| `PERSON`, `LOCATION`, `ADDRESS` | Unicode NFC, casefold, collapse Unicode whitespace to single spaces, trim surrounding whitespace, NFC again |
+| `PERSON`, `LOCATION`, `ADDRESS`, `CONTEXTUAL` | Unicode NFC, casefold, collapse Unicode whitespace to single spaces, trim surrounding whitespace, NFC again |
 | `DATE_OF_BIRTH` | Same text normalization; preserve date order and separators, without guessing ambiguous numeric dates |
 | `PHONE_NUMBER` | ASCII decimal digits after removing whitespace and `+()-./`; supported extension markers become `;ext=digits` |
 | `CREDIT_CARD`, `US_SSN` | ASCII decimal digits after removing whitespace, hyphens and periods |
@@ -80,6 +80,7 @@ normalized value unkeyed.
 | `API_KEY` | `APIKEY` |
 | `SECRET` | `SECRET` |
 | `EMPLOYEE_ID` | `EMPLOYEE` |
+| `CONTEXTUAL` | `CONTEXTUAL` |
 
 `TOKEN_LABELS` is immutable and labels are unique. Initial display tokens use
 `[LABEL_XXXX]`, where the suffix is the first four characters of uppercase,
@@ -174,3 +175,8 @@ No full digests or original values belong in upstream payloads or metrics.
 original coordinates and exact known session placeholders. The
 [analysis HTTP endpoint](api-contract.md#local-analysis-endpoint) now uses this
 allocator; protected upstream forwarding remains a later task.
+
+Phase 5 task 3 adds `CONTEXTUAL` for identifying descriptions found by the local
+reviewer. It uses text normalization and its own HMAC domain/token label. It is
+not a Stage 1 recognizer type. Existing token identities remain unchanged; the
+vault's existing schema accepts this typed value without a schema migration.

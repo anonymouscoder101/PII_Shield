@@ -51,6 +51,7 @@ class EntityType(StrEnum):
     API_KEY = "API_KEY"
     SECRET = "SECRET"
     EMPLOYEE_ID = "EMPLOYEE_ID"
+    CONTEXTUAL = "CONTEXTUAL"
 
 
 class DetectionStage(StrEnum):

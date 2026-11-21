@@ -76,7 +76,9 @@ the initial provisioning call took 24.85 s. It is not wired into chat yet; see
 measurement details, and the cold-start timeout limitation.
 Phase 5 task #2 adds a Stage 1-masked reviewer handoff and exact source-coordinate
 mapping. Placeholder-overlapping spans are unmappable; raw reviewer output stays
-untrusted until task #3 validates it. This helper is not connected to chat yet.
+untrusted until validated. Phase 5 task #3 adds strict structured-output validation,
+exact quote/position checks, source mapping, and merged Stage 1/Stage 2 plans,
+including the `CONTEXTUAL` entity type. Chat integration follows in later tasks.
 
 ## Setup with uv
 

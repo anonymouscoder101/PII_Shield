@@ -28,6 +28,7 @@ TOKEN_LABELS = MappingProxyType(
         EntityType.API_KEY: "APIKEY",
         EntityType.SECRET: "SECRET",
         EntityType.EMPLOYEE_ID: "EMPLOYEE",
+        EntityType.CONTEXTUAL: "CONTEXTUAL",
     }
 )
 _TEXT_TYPES = frozenset(
@@ -36,6 +37,7 @@ _TEXT_TYPES = frozenset(
         EntityType.LOCATION,
         EntityType.ADDRESS,
         EntityType.DATE_OF_BIRTH,
+        EntityType.CONTEXTUAL,
     }
 )
 _OPAQUE_TYPES = frozenset(

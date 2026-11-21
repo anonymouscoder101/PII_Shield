@@ -138,6 +138,7 @@ def test_all_types_have_stable_distinct_labels_and_domains():
         API_KEY="APIKEY",
         SECRET="SECRET",
         EMPLOYEE_ID="EMPLOYEE",
+        CONTEXTUAL="CONTEXTUAL",
     )
     assert dict(TOKEN_LABELS) == {
         EntityType(name): label for name, label in expected.items()

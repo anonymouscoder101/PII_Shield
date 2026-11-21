@@ -172,3 +172,8 @@ use `scripts/benchmark_reviewer.py` explicitly for the synthetic local benchmark
 review failure/cancellation, Unicode/source mapping after expansion and contraction,
 repeated/pre-existing tokens, equal-length/adjacent masks, invalid maps/bounds, and
 exclusion of raw review text from repr and serialization. It needs no Ollama service.
+
+`test_review_validation.py` covers strict reviewer JSON/schema errors, exact quoted
+positions, original-snapshot checks, Unicode/length-changing maps, placeholder and
+cross-placeholder rejection, shared threshold/allowlist/overlap behavior, masked
+batch-to-validation composition, and persistent CONTEXTUAL token restoration.

@@ -3,8 +3,8 @@
 Phase 5 task 1 provides a local Ollama/LangChain adapter and a measured latency
 baseline. Task 2 adds the masked-text handoff and source map described below.
 Neither task connects Stage 2 to chat or changes health's Stage 2 availability
-flag. Structured validation, merging and mode/failure-policy orchestration follow
-in tasks 3–6.
+flag. Task 3 adds structured validation and merged coordinate plans. Adversarial
+review checks and mode/failure-policy orchestration follow in tasks 4–6.
 
 ## Reproducible installation
 
@@ -44,8 +44,8 @@ The adapter follows the [official ChatOllama integration](https://reference.lang
 `shield.detect.stage2.Reviewer` exposes `available()`, `review(masked_text)`, and
 `aclose()`. `OllamaReviewer(model, timeout_s=10)` is an async context manager.
 Input and output use `SecretStr` to avoid accidental repr logging. Output is
-**untrusted JSON text**, not accepted detections; later tasks must validate exact
-text/positions and map offsets. The prompt asks for spans without free-text reasons.
+**untrusted JSON text**, not accepted detections; the validation layer below must
+check exact text/positions and map offsets. The prompt asks for spans without free-text reasons.
 The adapter does not store source text, model output, or reviewer reasons.
 
 The endpoint is fixed at `http://127.0.0.1:11434`; environment host/proxy settings
@@ -70,8 +70,9 @@ warm a model or guarantee subsequent inference. Review uses temperature 0, seed 
 keep-alive. A total async deadline and client timeouts apply; exceptions become
 `ReviewerUnavailable` with a static message. Cancellation propagates. Context exit
 closes both LangChain-owned Ollama clients (via tested, pinned SDK internals).
-Full output size/schema/offset policy remains task 3/5 work; do not feed these
-results into redaction before that validation exists.
+The task 3 validation layer enforces schema/offset checks. Bounded output size and
+application failure-policy integration remain task 5 work; raw adapter results
+must never be used directly for redaction.
 
 ## Measured baseline: 2026-11-21
 
@@ -141,6 +142,51 @@ expansions/contractions, repeated tokens and Unicode prefixes.
 This strict map is for future reviewer additions, which must refer to intact
 source text. It intentionally differs from the gateway's permissive interval
 projection used solely to reconcile partially visible allowlist disclosures.
-Task 3 must validate schema, exact text, bounds, unambiguous mapping and original
-text equality before accepting any contextual span. Public chat/analysis behavior
-and fast-mode independence remain unchanged in task 2.
+The validation layer below checks schema, exact text, bounds, unambiguous mapping
+and original text equality before accepting any contextual span. Public chat and
+analysis behavior remain unchanged until mode orchestration is connected.
+
+## Structured output validation and merging
+
+Phase 5 task 3 adds `validate_review(original_text: SecretStr, review, policy)`
+in `shield.detect.review_validation`. `review_and_resolve_texts` composes the
+masked handoff and validation for a batch. The caller retains the original
+snapshot and active session. Neither helper is connected to HTTP routes yet.
+
+The required output schema is a strict JSON object containing only `spans`:
+
+```json
+{"spans":[{"entity_type":"CONTEXTUAL","text":"the only cardiologist","start":0,"end":21,"confidence":0.95}]}
+```
+
+Entity types use the supported enum, including `CONTEXTUAL`. Every candidate
+requires a string quote, integer offsets, and finite confidence in [0, 1]. Boolean
+or string offsets are rejected. Optional `reason` text is accepted only as a
+secret field, never used, logged, exported or retained in validated results.
+All other fields are rejected. The Ollama prompt now requests confidence and
+uses `CONTEXTUAL` for identifying descriptions.
+
+Malformed JSON, duplicate keys, nonstandard numeric constants, missing required
+fields and schema violations invalidate the entire review with a static
+`ReviewerOutputError`. Validation errors and input text are never logged.
+Once the schema is valid, individual candidates are discarded if their range is
+empty/out of bounds, quoted text does not equal the precise masked slice, their
+span intersects/crosses any placeholder, or the mapped original slice differs
+from the quote. There is no quote search, normalization, fuzzy match or offset
+repair. Source metadata is revalidated and its unmodified regions must agree
+with the supplied original snapshot.
+
+Mapped candidates are tagged Stage 2 and passed through the shared confidence,
+exact-allowlist, duplicate and transitive-overlap policy. Accepted Stage 2 spans
+are merged with the already accepted Stage 1 spans; Stage 1 is not re-thresholded
+or re-allowlisted. The returned `ValidatedReview` contains only accepted addition
+coordinates, a merged `ResolvedDetections` plan/report, and a rejected-candidate
+count. Discard counts concern invalid ranges/quotes/maps; below-threshold counts
+are separately carried by the resolved plan. Duplicate removal does not increment
+the invalid-candidate count. Raw quotes and reasons are not present in results.
+
+Validation allocates no tokens and does not apply additional substitutions yet.
+The `CONTEXTUAL` type has its own token label, text normalization and HMAC domain,
+so later substitution can use the existing session/vault machinery. Stage 1's
+recognizer registry remains unchanged. Public mode routing, second-stage masking,
+final guard orchestration and failure-policy behavior follow in later tasks.
