@@ -8,7 +8,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from starlette.types import Receive
 
-from shield.api import AnalyzeResponse, ChatCompletionRequest
+from shield.api import AnalyzeResponse, ChatCompletionRequest, Stage1Status
 from shield.config import DetectionConfig
 from shield.contracts import ErrorCode
 from shield.errors import ShieldError
@@ -38,14 +38,24 @@ class DetectorProvider:
         self._factory = factory if factory is not None else _load_detector
         self._lock = Lock()
         self._detector: CandidateDetector | None = None
+        self._load_status: Stage1Status = "not_loaded"
+
+    @property
+    def load_status(self) -> Stage1Status:
+        # Publish immutable states without acquiring the loading lock: health
+        # must remain responsive while a worker is loading a large local model.
+        return self._load_status
 
     def get(self) -> CandidateDetector:
         with self._lock:
             if self._detector is None:
+                self._load_status = "loading"
                 try:
                     self._detector = self._factory(self._config)
                 except Exception:
+                    self._load_status = "unavailable"
                     raise ShieldError(ErrorCode.DETECTION_FAILED) from None
+                self._load_status = "loaded"
             return self._detector
 
 

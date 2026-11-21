@@ -519,3 +519,40 @@ strings. Upstream failures remain fixed 502/504 errors; unsupported input remain
 400; detector/vault failures never become upstream retries. No reviewer component
 is installed yet, and no storage or logging API accepts its free-text reasons.
 Future reviewer integration must reduce failures to approved codes and counts.
+
+## Health status
+
+`GET /shield/health` returns 200 with a strict `HealthResponse` and
+`Cache-Control: no-store`. It reports local liveness and capabilities without
+loading models, making network requests, opening SQLite, creating sessions,
+deriving keys, or unlocking the vault. It has no body or session-selection
+requirement and never returns `X-Shield-Session` or `X-Shield-Report`.
+
+```json
+{"status":"ok","ephemeral_available":true,"persistent_sessions_enabled":false,"vault_state":"disabled","stage1_status":"not_loaded","stage2_available":false}
+```
+
+- `status: ok` means the local HTTP application is responding.
+- `ephemeral_available: true` means memory-only request mode is supported without
+  an unlocked vault. This is a capability indicator, not an active RNG, detector
+  or upstream readiness probe.
+- `persistent_sessions_enabled` reports whether persistent mode was opted into.
+- `vault_state` is `disabled` when persistence is off, `locked` when enabled but
+  no authenticated, non-closing service is present, or `unlocked` otherwise.
+  Active session leases do not make the vault locked. Health never authenticates
+  or enumerates the vault and does not expose its path or session metadata.
+- `stage1_status` is `not_loaded`, `loading`, `loaded`, or `unavailable`, reflecting
+  the latest local detector load attempt. Only analysis/chat requests initiate
+  loading. Failed attempts remain visible until a later request retries loading;
+  a successful retry changes the status to `loaded`. Reading this snapshot does
+  not acquire the loader lock, so health remains responsive during model loading.
+  A loaded detector is not a guarantee that every inference will succeed.
+- `stage2_available` is false in Phase 4: a configured model name is not evidence
+  of a working reviewer. Phase 5 will integrate the reviewer and its readiness.
+
+Unavailable optional features do not change the 200 liveness response. Actual
+operations retain their specific detector/vault/upstream errors. This endpoint
+is not an end-to-end readiness or provider connectivity check. API keys,
+passphrases, model names, detection patterns/allowlists, provider URLs, database
+paths and internal exception reasons are never included. Health requests use
+the existing fixed `health` metrics category without a protection report.

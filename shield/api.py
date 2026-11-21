@@ -173,3 +173,17 @@ class AnalyzeResponse(Contract):
     below_threshold_count: Count
     preview_only: bool
     session_id: NonEmptyString | None = None
+
+
+Stage1Status = Literal["not_loaded", "loading", "loaded", "unavailable"]
+
+
+class HealthResponse(Contract):
+    """Local capability snapshot; no credentials, paths or model identifiers."""
+
+    status: Literal["ok"] = "ok"
+    ephemeral_available: Literal[True] = True
+    persistent_sessions_enabled: bool
+    vault_state: Literal["disabled", "locked", "unlocked"]
+    stage1_status: Stage1Status
+    stage2_available: bool = False

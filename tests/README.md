@@ -156,3 +156,8 @@ for JSON/SSE success with header omission on errors.
 static errors including upload/late failures, cancellation/limits, concurrent
 isolation, validation of telemetry data, and seeded provider/body/credential/reviewer
 text exclusion at DEBUG. The CLI configuration test checks disabled access logs.
+
+`test_health.py` covers the strict local health contract, credential/configuration
+privacy, no network/model loading or vault creation, optional-vault authenticated
+lifecycle, disabled-vault isolation, detector load failure/recovery, non-blocking
+snapshots during loading, and the OpenAPI schema.

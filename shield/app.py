@@ -18,6 +18,7 @@ from shield.api import (
     AnalyzeResponse,
     ChatCompletionRequest,
     ChatCompletionResponse,
+    HealthResponse,
     SessionCreateRequest,
     SessionResponse,
 )
@@ -101,6 +102,32 @@ def create_app(
     app.add_middleware(RequestLimitsMiddleware, config=app.state.config.server)
     install_error_handlers(app)
     app.add_middleware(MetricsMiddleware)
+
+    @app.get(
+        "/shield/health",
+        response_model=HealthResponse,
+        description=(
+            "Local liveness and capability snapshot. Does not load models, probe "
+            "upstream services, or unlock the optional vault."
+        ),
+    )
+    async def health(response: Response) -> HealthResponse:
+        enabled = app.state.config.sessions.persistent_enabled
+        vault_state = "disabled"
+        if enabled:
+            vault = app.state.vault
+            vault_state = (
+                "unlocked" if vault is not None and vault.is_unlocked else "locked"
+            )
+        response.headers["Cache-Control"] = "no-store"
+        return HealthResponse(
+            persistent_sessions_enabled=enabled,
+            vault_state=vault_state,
+            stage1_status=app.state.detector_provider.load_status,
+            # Configuring a model name is not evidence of a usable reviewer.
+            # Stage 2 integration and availability checks belong to Phase 5.
+            stage2_available=False,
+        )
 
     @app.post(
         "/v1/chat/completions",

@@ -64,6 +64,10 @@ Phase 4 task #8 adds structured, count-only request metrics and safe exception
 coverage for uploads and response delivery. The CLI disables access logs and
 emits JSON telemetry without URLs, session IDs, credentials, bodies, or reviewer
 reasons. See [private metrics and logging](docs/api-contract.md#private-metrics-and-logging).
+Phase 4 task #9 adds `GET /shield/health`, a local liveness and capability snapshot
+with ephemeral support, optional-vault lock state, Stage 1 loading state, and
+Stage 2 availability. It does not load models or contact upstream services.
+See [health status](docs/api-contract.md#health-status).
 
 ## Setup with uv
 
