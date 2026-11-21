@@ -29,6 +29,12 @@ pii-shield = "shield.__main__:main"
 stage1 = [
     "en-core-web-lg",
 ]
+stage2 = [
+    "langchain-ollama==1.0.1",
+    "langchain-core==1.8.4",
+    "ollama==0.6.3",
+    "langsmith==0.16.0",
+]
 
 [dependency-groups]
 dev = [

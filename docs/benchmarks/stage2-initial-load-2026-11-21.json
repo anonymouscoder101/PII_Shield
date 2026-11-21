@@ -1,0 +1,37 @@
+{
+  "measured_at_utc": "2026-11-21T18:39:51.691962+00:00",
+  "model": "llama3.1:8b",
+  "model_digest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+  "model_bytes": 4920753328,
+  "ollama_server": "0.9.0",
+  "architecture": "arm64",
+  "os": "Darwin",
+  "cpu": "Apple M1 Pro",
+  "memory_bytes": 17179869184,
+  "python": "3.14.8",
+  "packages": {
+    "langchain-ollama": "1.0.1",
+    "langchain-core": "1.8.4",
+    "ollama": "0.6.3",
+    "langsmith": "0.16.0"
+  },
+  "timeout_s": 60.0,
+  "num_ctx": 4096,
+  "num_predict": 256,
+  "temperature": 0,
+  "seed": 0,
+  "synthetic_input_characters": 132,
+  "first_call_s": 24.845188,
+  "warm_samples_s": [
+    4.631724,
+    4.365444,
+    4.825609,
+    4.922598,
+    4.914627
+  ],
+  "warm_median_s": 4.825609,
+  "warm_p95_nearest_rank_s": 4.922598,
+  "json_spans_array_responses": 6,
+  "total_calls": 6,
+  "notes": "Initial model load after provisioning, before explicit cache opt-out and callback-context isolation fixes. No global cache or collector configured. Synthetic input only; no raw outputs retained."
+}

@@ -68,6 +68,12 @@ Phase 4 task #9 adds `GET /shield/health`, a local liveness and capability snaps
 with ephemeral support, optional-vault lock state, Stage 1 loading state, and
 Stage 2 availability. It does not load models or contact upstream services.
 See [health status](docs/api-contract.md#health-status).
+Phase 5 task #1 adds an optional LangChain/Ollama reviewer interface and a local
+latency benchmark. The final adapter measured an
+8.14 s first call after model unload and a 4.35 s warm median on this M1 Pro;
+the initial provisioning call took 24.85 s. It is not wired into chat yet; see
+[local reviewer setup](docs/local-reviewer.md) for installation, privacy controls,
+measurement details, and the cold-start timeout limitation.
 
 ## Setup with uv
 

@@ -161,3 +161,9 @@ text exclusion at DEBUG. The CLI configuration test checks disabled access logs.
 privacy, no network/model loading or vault creation, optional-vault authenticated
 lifecycle, disabled-vault isolation, detector load failure/recovery, non-blocking
 snapshots during loading, and the OpenAPI schema.
+
+`test_stage2_reviewer.py` requires the optional stage2 extra and uses local HTTP
+mocks/fake models. It covers local-only readiness, cloud/remote rejection, safe
+failure/timeout behavior, disabled tracing and environment credential forwarding,
+and DEBUG-mode fail-closed behavior. Ordinary tests never run model inference;
+use `scripts/benchmark_reviewer.py` explicitly for the synthetic local benchmark.
