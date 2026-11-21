@@ -56,6 +56,7 @@ class SubstitutionResult(Contract):
     preserved_token_count: Count
     below_threshold_count: Count = 0
     report: ProtectionReport
+    allowlisted_spans: tuple[DetectedSpan, ...] = Field(default=(), exclude=True)
 
 
 def _known_ranges(text: str, session: TokenSession) -> list[tuple[int, int]]:
@@ -116,7 +117,9 @@ def _render(text: str, replacements) -> str:
     return "".join(reversed(chunks))
 
 
-def _apply(text, spans, ranges, session, *, report=None, below=0) -> SubstitutionResult:
+def _apply(
+    text, spans, ranges, session, *, report=None, below=0, allowed=()
+) -> SubstitutionResult:
     starts = [start for start, _ in ranges]
     selected = []
     previous_end = 0
@@ -158,6 +161,7 @@ def _apply(text, spans, ranges, session, *, report=None, below=0) -> Substitutio
         replacements=tuple(replacements),
         preserved_token_count=len(ranges),
         below_threshold_count=below,
+        allowlisted_spans=allowed,
         report=report
         if report is not None
         else ProtectionReport(
@@ -223,6 +227,7 @@ def sanitize_texts(
                     ranges,
                     session,
                     report=resolved.report,
+                    allowed=resolved.allowlisted_spans,
                     below=resolved.below_threshold_count,
                 )
             )

@@ -1,5 +1,6 @@
 """Restore every assistant text field and serialize buffered JSON or SSE."""
 
+from pydantic import Field
 from starlette.responses import JSONResponse, Response
 
 from shield.api import (
@@ -8,31 +9,52 @@ from shield.api import (
     ChunkChoice,
     CompletionDelta,
 )
+from shield.contracts import Contract, Count, ProtectionReport
 from shield.rehydrate import MappingReader, rehydrate_text
+
+
+class RestoredCompletion(Contract):
+    completion: ChatCompletionResponse = Field(repr=False)
+    unknown_token_count: Count
 
 
 def restore_completion(
     completion: ChatCompletionResponse, session: MappingReader
-) -> ChatCompletionResponse:
+) -> RestoredCompletion:
     choices = []
+    unknown = 0
     for choice in completion.choices:
         message = choice.message
-        update = {
-            field: rehydrate_text(value, session).text if value is not None else None
-            for field in ("content", "refusal")
-            for value in (getattr(message, field),)
-        }
+        update = {}
+        for field in ("content", "refusal"):
+            value = getattr(message, field)
+            if value is None:
+                update[field] = None
+            else:
+                restored = rehydrate_text(value, session)
+                update[field] = restored.text
+                unknown += restored.unknown_token_count
         choices.append(
             choice.model_copy(update={"message": message.model_copy(update=update)})
         )
-    return completion.model_copy(update={"choices": choices})
+    return RestoredCompletion(
+        completion=completion.model_copy(update={"choices": choices}),
+        unknown_token_count=unknown,
+    )
 
 
 def completion_response(
-    completion: ChatCompletionResponse, *, stream: bool, include_usage: bool
+    completion: ChatCompletionResponse,
+    *,
+    stream: bool,
+    include_usage: bool,
+    report: ProtectionReport,
+    session_id: str | None = None,
 ) -> Response:
     """Construct the entire delivery body before committing any response headers."""
-    headers = {"Cache-Control": "no-store"}
+    headers = {"Cache-Control": "no-store", "X-Shield-Report": report.model_dump_json()}
+    if session_id is not None:
+        headers["X-Shield-Session"] = session_id
     if not stream:
         return JSONResponse(completion.model_dump(mode="json"), headers=headers)
     base = dict(

@@ -55,6 +55,11 @@ finish-reason chunks, optional usage, and `[DONE]`, preserving IDs and choice
 indices. First-byte latency includes the full upstream completion and restoration;
 usage counts describe the tokenized exchange. Session cleanup completes before
 success headers; cancellation keeps persistent leases until HTTP cleanup drains.
+Phase 4 task #7 adds `X-Shield-Report` with protected occurrence counts, separate
+allowlisted-disclosure counts, and unknown response-token counts. Unknown tokens
+stay unchanged; `X-Shield-Session` is returned only for an explicitly selected
+persistent session. Both JSON and SSE are fully restored and serialized before
+ephemeral state is released.
 
 ## Setup with uv
 

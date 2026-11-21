@@ -156,3 +156,27 @@ def test_unmatched_closing_bracket_cannot_backtrack_to_bare_match(suffix):
         token = allocated(state)
         malformed = token[1:] + suffix
         assert rehydrate_text(malformed, state).text == malformed
+
+
+@pytest.mark.parametrize(
+    "unknown", ["[PERSON_ABCD]", "person-abcd", "[ Person ABCD ]", "[ALIEN_ABCD]"]
+)
+def test_unknown_occurrences_count_without_changing_text(unknown):
+    from shield.rehydrate import rehydrate_text
+
+    with ephemeral_session() as state:
+        token = allocated(state)
+        text = token + " / " + unknown + " / " + unknown
+        result = rehydrate_text(text, state)
+        assert result.text == "Alice / " + unknown + " / " + unknown
+        assert result.restored_count == 1 and result.unknown_token_count == 2
+
+
+def test_inserted_token_literals_are_not_counted_as_unknown():
+    from shield.rehydrate import rehydrate_text
+
+    with ephemeral_session() as state:
+        token = allocated(state, "Literal [PERSON_ABCD]")
+        result = rehydrate_text(token, state)
+        assert result.text == "Literal [PERSON_ABCD]"
+        assert result.unknown_token_count == 0

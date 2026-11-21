@@ -1,9 +1,11 @@
 """Worker-owned session scopes spanning preparation, async fetch and restoration."""
 
 import asyncio
+from collections import Counter
 from threading import Event
 
 from shield.analysis import AnalysisJob, _CancelledAnalysis
+from shield.contracts import ProtectionReport
 from shield.delivery import completion_response, restore_completion
 from shield.gateway import prepare_chat
 from shield.upstream import UpstreamClient
@@ -64,8 +66,16 @@ class ChatJob(AnalysisJob):
         if self._cancelled.is_set():
             raise _CancelledAnalysis()
         restored = restore_completion(completion, session)
+        disclosures = Counter(prepared.report.allowlisted_disclosure_counts)
+        disclosures.update(prepared.guard.non_message_allowlisted_disclosure_counts)
         return completion_response(
-            restored,
+            restored.completion,
+            report=ProtectionReport(
+                protected_counts=prepared.report.protected_counts,
+                allowlisted_disclosure_counts=dict(disclosures),
+                unknown_token_count=restored.unknown_token_count,
+            ),
+            session_id=self._session_id,
             stream=request.stream,
             include_usage=bool(
                 request.stream_options and request.stream_options.include_usage

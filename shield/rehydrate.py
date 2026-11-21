@@ -28,6 +28,11 @@ _VARIANT = re.compile(
 _CANONICAL = re.compile(r"(" + _LABELS + r")[ _-]([A-Z2-7]{4,32})", re.ASCII)
 
 
+_UNKNOWN_LABEL = re.compile(
+    r"\[([A-Z][A-Z0-9]{0,31})[_ -]([A-Z2-7]{4,32})\]", re.I | re.ASCII
+)
+
+
 class MappingReader(Protocol):
     session_id: str
 
@@ -45,6 +50,7 @@ class RehydrationResult(Contract):
     text: str = Field(repr=False)
     exact_count: Count
     variant_count: Count
+    unknown_token_count: Count
 
     @computed_field
     @property
@@ -86,6 +92,7 @@ def rehydrate_text(text: str, session: MappingReader) -> RehydrationResult:
         replacements = []
         exact_ranges = []
         counts = [0, 0]
+        unknown = 0
         cache = {}
 
         def original(token):
@@ -108,10 +115,12 @@ def rehydrate_text(text: str, session: MappingReader) -> RehydrationResult:
 
         for match in _EXACT.finditer(text):
             value = original(match.group())
+            exact_ranges.append(match.span())
             if value is not None:
                 replacements.append((match.start(), match.end(), value))
-                exact_ranges.append(match.span())
                 counts[0] += 1
+            else:
+                unknown += 1
         index = 0
         for match in _VARIANT.finditer(text):
             while index < len(exact_ranges) and exact_ranges[index][1] <= match.start():
@@ -123,13 +132,22 @@ def rehydrate_text(text: str, session: MappingReader) -> RehydrationResult:
             if value is not None:
                 replacements.append((match.start(), match.end(), value))
                 counts[1] += 1
+            elif token is not None:
+                unknown += 1
+        unknown += sum(
+            match[1].upper() not in TOKEN_LABELS.values()
+            for match in _UNKNOWN_LABEL.finditer(text)
+        )
         chunks, cursor = [], 0
         for start, end, value in sorted(replacements):
             chunks.extend((text[cursor:start], value))
             cursor = end
         chunks.append(text[cursor:])
         return RehydrationResult(
-            text="".join(chunks), exact_count=counts[0], variant_count=counts[1]
+            text="".join(chunks),
+            exact_count=counts[0],
+            variant_count=counts[1],
+            unknown_token_count=unknown,
         )
     except Exception:
         raise RehydrationError() from None

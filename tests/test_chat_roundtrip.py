@@ -479,3 +479,187 @@ async def test_cancelled_fetch_keeps_lease_until_transport_cleanup(
                 release.set()
                 await asyncio.to_thread(drained.wait, 1)
             assert (await api.delete(f"/shield/sessions/{sid}")).status_code == 204
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_report_counts_unknowns_across_all_fields_and_choices(stream):
+    def with_unknowns(request):
+        result = echo(request)
+        first, second = result.choices
+        return result.model_copy(
+            update={
+                "choices": [
+                    first.model_copy(
+                        update={
+                            "message": first.message.model_copy(
+                                update={
+                                    "content": request.messages[0].content
+                                    + " [PERSON_ABCD] [PERSON_ABCD]"
+                                }
+                            )
+                        }
+                    ),
+                    second.model_copy(
+                        update={
+                            "message": second.message.model_copy(
+                                update={"refusal": "[email-abcd]"}
+                            )
+                        }
+                    ),
+                ]
+            }
+        )
+
+    app = create_app(
+        detector_factory=Detector,
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream(with_unknowns)),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as api:
+        response = await api.post(
+            "/v1/chat/completions",
+            json={
+                "model": "synthetic",
+                "stream": stream,
+                "messages": [{"role": "user", "content": "Alice"}],
+            },
+        )
+    assert response.status_code == 200
+    assert "x-shield-session" not in response.headers
+    report = json.loads(response.headers["x-shield-report"])
+    assert report == {
+        "protected_counts": {"PERSON": 1},
+        "protected_count": 1,
+        "allowlisted_disclosure_counts": {},
+        "allowlisted_disclosure_count": 0,
+        "unknown_token_count": 3,
+    }
+    assert response.text.count("[PERSON_ABCD]") == 2
+    assert "[email-abcd]" in response.text and "Alice" in response.text
+    assert "Alice" not in response.headers["x-shield-report"]
+
+
+async def test_allowlisted_model_and_message_counts_are_separate():
+    from shield.config import DetectionConfig, ShieldConfig
+
+    app = create_app(
+        ShieldConfig(detection=DetectionConfig(allowlist=["Alice"])),
+        detector_factory=Detector,
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream(echo)),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as api:
+        response = await api.post(
+            "/v1/chat/completions",
+            json={"model": "Alice", "messages": [{"role": "user", "content": "Alice"}]},
+        )
+    report = json.loads(response.headers["x-shield-report"])
+    assert report["protected_count"] == 0
+    assert report["allowlisted_disclosure_counts"] == {"PERSON": 2}
+    assert report["allowlisted_disclosure_count"] == 2
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_selected_session_header_is_returned_only_on_success(tmp_path, stream):
+    from pydantic import SecretStr
+
+    from shield.config import Argon2Config, SessionsConfig, ShieldConfig, VaultConfig
+    from shield.credentials import RuntimeCredentials
+
+    config = ShieldConfig(
+        sessions=SessionsConfig(persistent_enabled=True),
+        vault=VaultConfig(
+            path=tmp_path / "vault.db",
+            argon2=Argon2Config(memory_kib=32, time_cost=1, parallelism=1),
+        ),
+    )
+    app = create_app(
+        config,
+        RuntimeCredentials(vault_passphrase=SecretStr("synthetic")),
+        detector_factory=Detector,
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream(echo)),
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as api:
+            sid = (await api.post("/shield/sessions", json={})).json()["session_id"]
+            payload = {
+                "model": "synthetic",
+                "stream": stream,
+                "messages": [{"role": "user", "content": "Alice"}],
+            }
+            response = await api.post(
+                "/v1/chat/completions", headers={"X-Shield-Session": sid}, json=payload
+            )
+            assert response.status_code == 200
+            assert response.headers["x-shield-session"] == sid
+            report = json.loads(response.headers["x-shield-report"])
+            assert report["protected_count"] == 1 and report["unknown_token_count"] == 0
+            assert "Alice" in response.text and sid not in response.text
+            await api.delete(f"/shield/sessions/{sid}")
+            failed = await api.post(
+                "/v1/chat/completions", headers={"X-Shield-Session": sid}, json=payload
+            )
+            assert failed.status_code == 404
+            assert "x-shield-session" not in failed.headers
+            assert "x-shield-report" not in failed.headers
+
+
+async def test_partly_redacted_allowlisted_disclosure_remains_in_report():
+    from shield.config import DetectionConfig, ShieldConfig
+
+    config = ShieldConfig(
+        detection=DetectionConfig(
+            allowlist=["1990-09-14"], employee_id_pattern=r"\b1990\b"
+        )
+    )
+    app = create_app(
+        config, upstream_transport=httpx.ASGITransport(app=create_fake_upstream(echo))
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as api:
+        response = await api.post(
+            "/v1/chat/completions",
+            json={
+                "model": "synthetic",
+                "messages": [{"role": "user", "content": "DOB: 1990-09-14"}],
+            },
+        )
+    assert response.status_code == 200
+    report = json.loads(response.headers["x-shield-report"])
+    assert report["protected_counts"] == {"EMPLOYEE_ID": 1}
+    assert report["allowlisted_disclosure_counts"] == {"DATE_OF_BIRTH": 1}
+
+
+async def test_final_guard_new_message_disclosure_is_counted():
+    from shield.config import DetectionConfig, ShieldConfig
+
+    app = create_app(
+        ShieldConfig(detection=DetectionConfig(allowlist=["+1 202-555-0147"])),
+        upstream_transport=httpx.ASGITransport(app=create_fake_upstream(echo)),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as api:
+        response = await api.post(
+            "/v1/chat/completions",
+            json={
+                "model": "synthetic",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "phone 123 Alpha Beta Gamma Delta Epsilon Zeta Street "
+                            "+1 202-555-0147"
+                        ),
+                    }
+                ],
+            },
+        )
+    assert response.status_code == 200
+    report = json.loads(response.headers["x-shield-report"])
+    assert report["allowlisted_disclosure_counts"] == {"PHONE_NUMBER": 1}

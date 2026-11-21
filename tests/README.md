@@ -146,3 +146,8 @@ replacement, active-session isolation, persistent restart recovery, and safe fai
 content/refusal restoration, JSON/SSE framing and usage, zero leaked fixture values
 in captured payloads, JSON errors before SSE headers, pre-header state cleanup,
 disconnect/cancellation, and persistent leases through fetch and cancellation drain.
+
+Phase 4 task 7 extends restoration/round-trip coverage with unknown occurrence
+counting, no double counting or scanning inserted originals, count-only report
+headers, final-scan disclosure counts including model, and selected-session headers
+for JSON/SSE success with header omission on errors.

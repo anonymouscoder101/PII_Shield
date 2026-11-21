@@ -9,7 +9,8 @@ from collections import Counter
 from pydantic import Field
 
 from shield.api import ChatCompletionRequest
-from shield.contracts import Contract, ErrorCode, ProtectionReport
+from shield.contracts import Contract, DetectedSpan, ErrorCode, ProtectionReport
+from shield.detect.resolve import _report
 from shield.errors import ShieldError
 from shield.guard import GuardReport, scan_payload
 from shield.substitute import CandidateDetector, TokenSession, sanitize_texts
@@ -20,6 +21,29 @@ class PreparedChat(Contract):
     report: ProtectionReport
     payload: bytes = Field(repr=False, exclude=True)
     guard: GuardReport
+
+
+def _source_span(span, replacements):
+    def position(value, end=False):
+        offset = 0
+        for replacement in replacements:
+            source = replacement.span
+            start = source.start + offset
+            stop = start + len(replacement.token)
+            if value <= start:
+                return value - offset
+            if value < stop:
+                return source.end if end else source.start
+            offset += len(replacement.token) - (source.end - source.start)
+        return value - offset
+
+    return DetectedSpan(
+        start=position(span.start),
+        end=position(span.end, True),
+        entity_type=span.entity_type,
+        confidence=span.confidence,
+        stage=span.stage,
+    )
 
 
 def prepare_chat(
@@ -38,10 +62,8 @@ def prepare_chat(
         for message, result in zip(request.messages, results, strict=True)
     ]
     protected = Counter()
-    allowlisted = Counter()
     for result in results:
         protected.update(result.report.protected_counts)
-        allowlisted.update(result.report.allowlisted_disclosure_counts)
     outgoing = request.model_copy(
         update={"messages": messages, "stream": False, "stream_options": None}
     )
@@ -49,6 +71,19 @@ def prepare_chat(
     guard = scan_payload(payload, session, detector)
     if guard.remaining_count:
         raise ShieldError(ErrorCode.PROTECTION_BLOCKED)
+    # Reconcile both passes in source coordinates. The shared overlap/visibility
+    # policy retains partial disclosures and coalesces duplicate occurrences.
+    allowlisted = Counter()
+    for index, result in enumerate(results):
+        guard_spans = tuple(
+            _source_span(span, result.replacements)
+            for span in guard.message_allowlisted_spans.get(index, ())
+        )
+        reconciled = _report(
+            tuple(item.span for item in result.replacements),
+            result.allowlisted_spans + guard_spans,
+        )
+        allowlisted.update(reconciled.allowlisted_disclosure_counts)
     return PreparedChat(
         request=outgoing,
         payload=payload,

@@ -121,8 +121,13 @@ placeholder masking and original-text boundary evidence, confidence threshold,
 and exact allowlist rules. It never allocates or rewrites text.
 
 The internal `GuardReport` contains counts of remaining accepted spans, separate
-allowlisted disclosures, and below-threshold candidates. These counts are not
-added to the original protection report, which would double-count disclosures.
+allowlisted disclosures, and below-threshold candidates. For chat headers, the
+message disclosure spans from preparation and the final guard are reconciled in
+original coordinates through the source/token replacement intervals. The shared
+overlap and visibility policy counts them once, including partially visible
+originals and disclosures newly recognized after context changes. The guard
+separately tracks disclosures outside message content by JSON location; only
+those additional counts are added. Source/field span metadata stays internal.
 Malformed payloads or detector failures raise static errors; unknown canonical
 tokens fail ownership checks. Phase 4 task 3 makes `prepare_chat` reject any nonzero remaining count with
 `ShieldError(PROTECTION_BLOCKED)` before returning a prepared payload. The HTTP

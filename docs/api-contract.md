@@ -388,8 +388,7 @@ words/identifiers are not restored.
 
 Both matching passes inspect the original response, and replacements are applied
 once in source order. Inserted original values cannot trigger another restoration,
-even when an original itself contains a registered token. Unknown-token counting
-and response report headers follow in task 7. This helper does not call the
+even when an original itself contains a registered token. Unknown-token occurrences are counted in the response report. This helper does not call the
 provider, own a session, or log/store response text.
 
 ## Buffered chat delivery
@@ -424,8 +423,7 @@ or disconnect signals the worker, closes its published session state, and cancel
 the async fetch. If transport cancellation cleanup is still running, the worker
 keeps the persistent lease until the actual coroutine drains; competing session
 operations continue to return 409. Successful serialization finishes before
-session cleanup and before any response headers. Report headers and unknown-token
-counts follow in task 7.
+session cleanup and before any response headers. Report headers include protection, disclosure and unknown-token counts.
 
 `create_app(upstream_transport=...)` is a server-side test hook for the local fake
 or an HTTPX mock transport; it is not a request/configuration field. Tests never
@@ -433,3 +431,44 @@ need provider access. For a manual local demo, start `python -m
 shield.fake_upstream` on port 8001, then the shield on port 8000 using the default
 upstream URL. The fake's canned response contains fixed synthetic tokens; only
 actual current-session tokens are restored. Unknown fixed tokens remain visible.
+
+## Protection report headers
+
+Phase 4 task 7 returns `X-Shield-Report` on successful chat responses, identically
+for JSON and buffered SSE. The value is compact JSON, using `ProtectionReport`:
+
+```json
+{"protected_counts":{"PERSON":2},"allowlisted_disclosure_counts":{"EMAIL_ADDRESS":1},"unknown_token_count":3,"protected_count":2,"allowlisted_disclosure_count":1}
+```
+
+`protected_counts` counts original message spans actually replaced, rather than
+unique mappings or restored occurrences. `allowlisted_disclosure_counts` counts
+intentional disclosures in message content and other outgoing fields, including
+`model`. For each message, preparation and final-guard disclosure spans are
+reconciled in original-text coordinates using replacement intervals. The shared
+overlap and visibility policy counts each disclosure group once, preserving
+partially visible originals and disclosures newly recognized after substitution
+changes detector context. Other fields use final-guard counts tracked separately
+by JSON location. Coordinate metadata remains internal; headers contain counts only. Confidence thresholds and allowlist rules
+remain the same as detection. These counts are not a guarantee of complete
+PII detection. Totals are the sums of each map.
+
+`unknown_token_count` counts unresolved token occurrences across every choice's
+content and refusal text, with repeated occurrences counted separately. Counted
+forms include complete recognized-label/suffix pairs in the supported exact or
+formatting-variant syntax that have no active-session mapping. Simple bracketed
+unknown ASCII labels (1–32 letters/digits starting with a letter) followed by an
+underscore, space or hyphen and a 4–32 character Base32 suffix are also counted.
+Malformed/incomplete token shapes and arbitrary bare unknown-label identifiers
+are outside this counting grammar. Such text remains unchanged too. Unknowns
+are counted from original response text, so inserted originals containing token
+literals are neither counted nor rescanned. Exact matches are counted once,
+never again as formatting variants. The rehydration result exposes this count;
+restoration aggregates it across fields and choices before delivery.
+
+The report contains no plaintext, tokens, mapping digests, internal session IDs,
+provider data or credentials. `X-Shield-Session` is returned only when the caller
+explicitly selected a valid persistent session. Ephemeral requests never receive
+an internal ID. Errors do not return chat report or session headers. All headers
+are constructed after complete restoration and serialization; ephemeral cleanup
+finishes before success headers are emitted, including for SSE.
