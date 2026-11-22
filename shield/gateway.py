@@ -57,6 +57,11 @@ def prepare_chat(
     The caller owns the session through eventual sending and restoration.
     """
     results = sanitize_texts((m.content for m in request.messages), session, detector)
+    return finish_chat(request, session, detector, results)
+
+
+def finish_chat(request, session, detector, results) -> PreparedChat:
+    """Serialize final substitutions and guard exact bytes after all stages."""
     messages = [
         message.model_copy(update={"content": result.sanitized_text})
         for message, result in zip(request.messages, results, strict=True)

@@ -188,3 +188,11 @@ aggregate UTF-8 budgets, synchronous deadline overruns, cancellation, whole-batc
 Stage 1 fallback, and typed delivery/metrics outcomes. `test_review_transport.py`
 checks streaming byte caps despite absent/misleading lengths and compressed replies.
 The adapter suite also exercises the real SDK stream path with synthetic chunks.
+
+`test_modes.py` verifies fast-mode reviewer independence, balanced/paranoid chat
+and analysis, combined masking/counts, live fallback headers, final guard placement,
+zero forwarding on failure, persistent contextual mapping commits/restoration,
+cached health state, delayed reviewer cleanup leases, and cleanup timeout/cancellation
+precedence. `conftest.py` supplies an empty reviewer only as the default application
+test double; explicit mode tests and SDK mocks exercise their own behaviors. No
+ordinary test depends on an Ollama daemon; live inference uses the benchmark.

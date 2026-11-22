@@ -71,7 +71,7 @@ See [health status](docs/api-contract.md#health-status).
 Phase 5 task #1 adds an optional LangChain/Ollama reviewer interface and a local
 latency benchmark. The final adapter measured an
 8.14 s first call after model unload and a 4.35 s warm median on this M1 Pro;
-the initial provisioning call took 24.85 s. It is not wired into chat yet; see
+the initial provisioning call took 24.85 s. See
 [local reviewer setup](docs/local-reviewer.md) for installation, privacy controls,
 measurement details, and the cold-start timeout limitation.
 Phase 5 task #2 adds a Stage 1-masked reviewer handoff and exact source-coordinate
@@ -82,8 +82,11 @@ including the `CONTEXTUAL` entity type. Phase 5 task #4 enforces additive-only
 merging with an authoritative Stage 1 baseline and isolates reviewer document
 content in a JSON data envelope. Phase 5 task #5 bounds reviewer responses and
 contextual batch time, fails closed by default, and exposes explicit Stage 1-only
-fallback outcomes through delivery headers and private metrics. Public mode
-orchestration and the two-stage final guard follow in task #6.
+fallback outcomes through delivery headers and private metrics. Phase 5 task #6
+connects both chat and analysis to mode selection. `fast` is
+Stage 1-only and never constructs a reviewer. `balanced` (default) and `paranoid`
+require the local reviewer; accepted additions are masked before the exact-byte
+final guard. Stage 2 outages fail closed unless fallback is explicitly enabled.
 
 ## Setup with uv
 
@@ -127,8 +130,11 @@ uv sync --locked --extra stage1
 To preserve additional packages already installed in your environment, use
 `uv sync --locked --extra stage1 --inexact`. Detection loads the local model
 explicitly and never downloads one at runtime. App construction/startup remains
-independent of the model until the gateway is wired. Stage 2 integrations arrive
-in their own phase.
+independent of model availability. For `balanced`/`paranoid`, install both extras
+with `uv sync --locked --extra stage1 --extra stage2 --inexact` and start the
+local Ollama model as described in [reviewer setup](docs/local-reviewer.md).
+For Stage 1-only operation, set `detection.mode: fast` in `shield.yaml`. Missing
+reviewer dependencies/model availability return 503 in Stage 2 modes by default.
 
 ## Run the scaffold
 

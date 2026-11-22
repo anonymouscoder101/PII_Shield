@@ -10,7 +10,7 @@ from starlette.types import Receive
 
 from shield.api import AnalyzeResponse, ChatCompletionRequest, Stage1Status
 from shield.config import DetectionConfig
-from shield.contracts import ErrorCode
+from shield.contracts import ErrorCode, Stage2Outcome
 from shield.errors import ShieldError
 from shield.persistent import PersistentSessions, SessionAccessError
 from shield.session import ephemeral_session
@@ -128,7 +128,9 @@ class AnalysisJob:
 
     def run(
         self, text: str | ChatCompletionRequest
-    ) -> AnalyzeResponse | Response | None:
+    ) -> (
+        AnalyzeResponse | Response | tuple[AnalyzeResponse, Stage2Outcome | None] | None
+    ):
         if self._cancelled.is_set():
             return None
         scope = (
@@ -181,7 +183,7 @@ class AnalysisJob:
 
 async def run_analysis_job(
     job: AnalysisJob, text: str | ChatCompletionRequest, receive: Receive
-) -> AnalyzeResponse | Response | None:
+) -> AnalyzeResponse | Response | tuple[AnalyzeResponse, Stage2Outcome | None] | None:
     """Stop work publication promptly on disconnect, cancellation or deadline.
 
     Cancelling the await cannot interrupt a running thread. Job cancellation

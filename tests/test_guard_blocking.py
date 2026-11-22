@@ -7,7 +7,7 @@ from contextlib import contextmanager
 import httpx
 import pytest
 
-from shield import analysis, gateway
+from shield import analysis, chat
 from shield.app import create_app
 from shield.config import DetectionConfig
 from shield.contracts import DetectedSpan, EntityType
@@ -33,18 +33,17 @@ class Detector:
 
 
 def incomplete_masking(monkeypatch):
-    original = gateway.sanitize_texts
+    original = chat.finish_chat
 
-    def incomplete(texts, session, detector):
-        texts = tuple(texts)
-        results = original(texts, session, detector)
-        # Inject a masking defect after real detection and mapping registration.
-        return tuple(
-            result.model_copy(update={"sanitized_text": text})
-            for text, result in zip(texts, results, strict=True)
+    def incomplete(request, session, detector, results):
+        # Inject a defect after real detection, registration and contextual review.
+        results = tuple(
+            result.model_copy(update={"sanitized_text": message.content})
+            for message, result in zip(request.messages, results, strict=True)
         )
+        return original(request, session, detector, results)
 
-    monkeypatch.setattr(gateway, "sanitize_texts", incomplete)
+    monkeypatch.setattr(chat, "finish_chat", incomplete)
 
 
 @pytest.mark.parametrize("role", ["system", "developer", "user", "assistant"])

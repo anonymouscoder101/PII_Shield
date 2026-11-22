@@ -50,7 +50,14 @@ def _ensure_open(session):
 
 
 async def review_with_policy(
-    texts, session, detector, reviewer, config: DetectionConfig
+    texts,
+    session,
+    detector,
+    reviewer,
+    config: DetectionConfig,
+    *,
+    stage1=None,
+    close_reviewer=False,
 ) -> ReviewBatch:
     """Bound the entire contextual batch after Stage 1, including validation.
 
@@ -58,37 +65,54 @@ async def review_with_policy(
     discards every partial addition. Cancellation always propagates.
     """
     sources = tuple(texts)
-    first = sanitize_texts(sources, session, detector)
+    first = sanitize_texts(sources, session, detector) if stage1 is None else stage1
+    if len(first) != len(sources):
+        raise ShieldError(ErrorCode.INTERNAL_ERROR)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + config.stage2_timeout_s
     plans, used = [], 0
     try:
         async with asyncio.timeout_at(deadline):
-            for original, result in zip(sources, first, strict=True):
-                if loop.time() >= deadline:
-                    raise TimeoutError()
-                _ensure_open(session)
-                remaining = config.stage2_max_output_bytes - used
-                if remaining <= 0:
-                    raise ReviewerOutputLimit()
-                output = await reviewer.review(SecretStr(result.sanitized_text))
-                _ensure_open(session)
-                raw = check_output(output, remaining)
-                used += len(raw.encode("utf-8"))
-                if loop.time() >= deadline:
-                    raise TimeoutError()
-                plan = validate_review(
-                    SecretStr(original),
-                    ContextualReview(
-                        stage1=result,
-                        source_map=result.source_map,
-                        raw_output=output,
-                    ),
-                    detector.policy,
-                    max_output_bytes=remaining,
-                )
-                _ensure_open(session)
-                plans.append(plan)
+            try:
+                for original, result in zip(sources, first, strict=True):
+                    if loop.time() >= deadline:
+                        raise TimeoutError()
+                    _ensure_open(session)
+                    remaining = config.stage2_max_output_bytes - used
+                    if remaining <= 0:
+                        raise ReviewerOutputLimit()
+                    output = await reviewer.review(SecretStr(result.sanitized_text))
+                    _ensure_open(session)
+                    raw = check_output(output, remaining)
+                    used += len(raw.encode("utf-8"))
+                    if loop.time() >= deadline:
+                        raise TimeoutError()
+                    plan = validate_review(
+                        SecretStr(original),
+                        ContextualReview(
+                            stage1=result,
+                            source_map=result.source_map,
+                            raw_output=output,
+                        ),
+                        detector.policy,
+                        max_output_bytes=remaining,
+                    )
+                    _ensure_open(session)
+                    plans.append(plan)
+                    if loop.time() >= deadline:
+                        raise TimeoutError()
+            except BaseException:
+                if close_reviewer:
+                    try:
+                        await reviewer.aclose()
+                    except Exception:
+                        # Cleanup cannot replace cancellation, a session/guard
+                        # error, or the original review failure with fallback.
+                        pass
+                raise
+            else:
+                if close_reviewer:
+                    await reviewer.aclose()
                 if loop.time() >= deadline:
                     raise TimeoutError()
     except ShieldError, SessionAccessError:

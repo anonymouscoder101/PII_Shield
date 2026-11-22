@@ -547,8 +547,9 @@ requirement and never returns `X-Shield-Session` or `X-Shield-Report`.
   a successful retry changes the status to `loaded`. Reading this snapshot does
   not acquire the loader lock, so health remains responsive during model loading.
   A loaded detector is not a guarantee that every inference will succeed.
-- `stage2_available` is false in Phase 4: a configured model name is not evidence
-  of a working reviewer. Phase 5 will integrate the reviewer and its readiness.
+- `stage2_available` is initially false and reflects the latest completed
+  contextual review: true on success, false on failure/fallback. It is cached,
+  may become stale, and health never probes Ollama or constructs a reviewer.
 
 Unavailable optional features do not change the 200 liveness response. Actual
 operations retain their specific detector/vault/upstream errors. This endpoint
@@ -560,7 +561,7 @@ the existing fixed `health` metrics category without a protection report.
 ## Contextual-review outcome hooks
 
 Phase 5 task 5 adds optional typed Stage 2 outcomes to delivery and metrics;
-public chat mode integration follows in task 6. A delivery with an explicit
+public chat/analysis mode integration is available in task 6. A delivery with an explicit
 successful outcome adds `X-Shield-Stage2: complete`. An explicitly configured
 fail-open outcome adds `X-Shield-Stage2: stage1_fallback` plus
 `X-Shield-Stage2-Failure: timeout|output_limit|invalid_output|unavailable`.
@@ -569,3 +570,20 @@ headers and raises 503 `reviewer_unavailable`. Metrics may include the same
 `stage2` object; it contains only fixed status/failure categories. Existing Stage 1
 requests have no outcome headers/metric field until review is requested.
 See [bounded local review](local-reviewer.md#bounded-review-and-failure-policy).
+
+## Active detection modes
+
+Phase 5 task 6 applies `detection.mode` to chat and analysis. Fast mode performs
+Stage 1 only and does not touch Ollama or the optional LangChain runtime. Balanced
+(default) and paranoid add local contextual review and require its dependencies
+and running model unless fail-open was explicitly configured. Threshold defaults
+remain 0.6/0.5/0.3; explicit thresholds override them.
+
+Analysis exposes both stages' final replacements in original-text coordinates.
+Chat masks all accepted additions, commits mappings, then runs the final guard
+on the exact serialized outgoing payload after both stages. Explicit Stage 1
+fallback also passes that guard before any provider send. Outcome headers and
+metrics reflect completed review or explicit fallback; failed closed requests
+return JSON 503 before success/SSE headers. Session leases remain held through
+reviewer cleanup on cancellation just as they do through provider cleanup.
+See [public mode orchestration](local-reviewer.md#public-mode-orchestration).

@@ -8,7 +8,6 @@ from starlette.concurrency import run_in_threadpool
 
 from shield import __version__
 from shield.analysis import (
-    AnalysisJob,
     DetectorFactory,
     DetectorProvider,
     run_analysis_job,
@@ -35,6 +34,7 @@ from shield.errors import (
 from shield.limits import RequestLimitsMiddleware
 from shield.metrics import MetricsMiddleware, record_protection
 from shield.persistent import SessionAccessError, VaultStartupError, VaultStartupHandoff
+from shield.processing import ModeAnalysisJob, ReviewerFactory, ReviewerProvider
 from shield.session_access import require_session_access, require_unlocked_vault
 
 
@@ -44,6 +44,7 @@ def create_app(
     *,
     detector_factory: DetectorFactory | None = None,
     upstream_transport: httpx.AsyncBaseTransport | None = None,
+    reviewer_factory: ReviewerFactory | None = None,
 ) -> FastAPI:
     """Create routes without I/O; opt-in vault authentication runs during lifespan."""
 
@@ -93,6 +94,9 @@ def create_app(
     app.state.detector_provider = DetectorProvider(
         app.state.config.detection, detector_factory
     )
+    app.state.reviewer_provider = ReviewerProvider(
+        app.state.config.detection, reviewer_factory
+    )
     app.state.vault = None  # Authenticated service is installed only during lifespan.
 
     @app.exception_handler(SessionAccessError)
@@ -125,8 +129,8 @@ def create_app(
             vault_state=vault_state,
             stage1_status=app.state.detector_provider.load_status,
             # Configuring a model name is not evidence of a usable reviewer.
-            # Stage 2 integration and availability checks belong to Phase 5.
-            stage2_available=False,
+            # Cached observation only: health never calls the local model.
+            stage2_available=app.state.reviewer_provider.available,
         )
 
     @app.post(
@@ -186,6 +190,7 @@ def create_app(
             request.app.state.config.upstream,
             request.app.state.credentials,
             upstream_transport,
+            request.app.state.reviewer_provider,
         )
         try:
             result = await run_analysis_job(job, body, request.receive)
@@ -212,13 +217,23 @@ def create_app(
         require_session_access(request)
         session_id = request.headers.get("x-shield-session")
         service = request.app.state.vault if session_id is not None else None
-        job = AnalysisJob(request.app.state.detector_provider, service, session_id)
+        job = ModeAnalysisJob(
+            request.app.state.detector_provider,
+            service,
+            session_id,
+            request.app.state.reviewer_provider,
+        )
         try:
             result = await run_analysis_job(job, body.text, request.receive)
             if result is None:
                 raise ShieldError(ErrorCode.REQUEST_TIMEOUT)
         finally:
             job.cancel()
+        result, outcome = result
+        if outcome is not None:
+            response.headers["X-Shield-Stage2"] = outcome.status
+            if outcome.failure is not None:
+                response.headers["X-Shield-Stage2-Failure"] = outcome.failure
         record_protection(result.report)
         response.headers["Cache-Control"] = "no-store"
         if session_id is not None:

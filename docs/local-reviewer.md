@@ -2,11 +2,11 @@
 
 Phase 5 task 1 provides a local Ollama/LangChain adapter and a measured latency
 baseline. Task 2 adds the masked-text handoff and source map described below.
-Neither task connects Stage 2 to chat or changes health's Stage 2 availability
-flag. Task 3 adds structured validation and merged coordinate plans, and task 4
+The first five tasks provide the components; task 6 connects them to public
+chat/analysis modes and cached health availability. Task 3 adds structured validation and merged coordinate plans, and task 4
 adds an enforced additive merge and adversarial document/reviewer checks.
 Task 5 adds bounded failure-policy orchestration and outcome reporting. Public
-mode integration and final guard orchestration follow in task 6.
+mode integration and final guard orchestration are described in the final section.
 
 ## Reproducible installation
 
@@ -227,15 +227,14 @@ the actual adapter's message construction. They verify application invariants,
 not claims about a particular model's behavior against every injection. The
 latency artifacts above describe the earlier task 1 prompt; rerun the benchmark
 if measurements for this hardened prompt/envelope are needed. No model calls are
-made by these tests. Public chat integration remains for task 6.
+made by these tests. Public mode integration is described below.
 
 ## Bounded review and failure policy
 
 Phase 5 task 5 adds `review_with_policy(texts, session, detector, reviewer, config)`
 in `shield.detect.review_policy`. It returns `ReviewBatch` with Stage 1 results,
 validated coordinate plans, and a typed `Stage2Outcome`. This is the entry point
-for later Stage 2 mode orchestration. The existing HTTP chat path remains Stage 1
-until task 6 connects both stages and the final guard.
+for Stage 2 mode orchestration, now used by public chat and analysis in task 6.
 
 `detection.stage2_max_output_bytes` defaults to **65536** (strict positive integer).
 Pass this value to `OllamaReviewer(max_output_bytes=...)` too. The adapter bounds
@@ -278,7 +277,66 @@ without reviewer text or exception details. Requests that never attempt review
 retain their existing headers and metrics (no Stage 2 outcome field).
 
 The policy and delivery primitives are tested together using controlled local
-routes and fake reviewers, including JSON/SSE error boundaries. They are not yet
-wired to public mode selection. In task 6, callers must select review only in
-Stage 2 modes, pass the configured adapter limits, preserve the worker-owned
-session lifecycle, apply merged plans, and run the final outgoing guard.
+routes and fake reviewers, including JSON/SSE error boundaries. The public mode flow now selects review only in Stage 2 modes, passes configured
+adapter limits, preserves worker-owned sessions, applies merged plans and runs
+the final outgoing guard.
+
+## Public mode orchestration
+
+Phase 5 task 6 connects `/v1/chat/completions` and `/shield/analyze` to mode
+selection via `shield/processing.py`:
+
+| Mode | Processing |
+| --- | --- |
+| `fast` | Stage 1 only; never constructs a reviewer, checks its availability, or imports the optional LangChain runtime |
+| `balanced` | Stage 1 followed by bounded, validated contextual review; default threshold 0.5 |
+| `paranoid` | The same two stages; default threshold 0.3 |
+
+An explicit threshold still overrides the mode default. Balanced remains the
+configuration default, so install the `stage2` extra and run the local model for
+normal operation. Missing optional dependencies, model outages, invalid output,
+limits and deadlines follow `on_stage2_failure` (default fail-closed). Fast mode
+needs only the Stage 1 dependencies/model and remains independent of Ollama.
+
+NLP and token allocation remain in a worker that owns the request/session scope.
+Stage 2 HTTP runs on the application event loop, using precomputed Stage 1 results
+so heavy NLP is not repeated there. Each request creates its reviewer lazily and
+closes it before final application. Factory/close failures enter the contextual
+failure policy. Cleanup errors cannot replace cancellation or an earlier guard,
+session or review error; success is checked against the absolute deadline after
+cleanup as well as after validation.
+
+Only after the entire batch succeeds are accepted Stage 2 additions applied in
+original coordinates. Stage 1 token identities are reused; new contextual
+mappings are registered/committed before forwarding. Explicit fail-open uses only
+the original Stage 1 batch. Chat then serializes the final request once and runs
+the Stage 1 guard over every decoded string in those exact bytes, in all modes
+and on fallback. Guard failure sends zero provider requests. The same guarded
+bytes are sent upstream, followed by full restoration and JSON/buffered SSE
+serialization before the worker releases its session.
+
+Analysis returns combined spans with original source coordinates and their
+`stage1`/`stage2` provenance, final sanitized text and combined counts. It makes no
+provider calls; the provider-payload guard belongs to chat's forwarding boundary.
+Both endpoints return the typed Stage 2 outcome/fallback headers and metrics.
+Fast responses have no Stage 2 outcome headers. A cancelled/disconnected request
+cannot forward a new payload; its lease stays held until any in-flight reviewer
+or HTTP cleanup actually drains.
+
+Health's `stage2_available` is a cached observation of the latest completed
+review: initially false, true after valid review, false after review failure or
+fallback. Health never constructs a reviewer or performs a model/network probe.
+This can become stale if Ollama stops after the last request and says nothing
+about model accuracy. Cancellation does not reclassify model availability.
+
+The default 10-second contextual budget covers the whole sequential message
+batch, including reviewer cleanup. Multiple warm calls or cold model loading can
+exceed it; the historical single-paragraph benchmark does not guarantee a
+multi-message request fits. Configure the timeout deliberately for your workload,
+warm the model, or use fast mode; the application does not silently extend it.
+
+`create_app(reviewer_factory=...)` is a server-side injection hook. The factory
+receives validated `DetectionConfig` and should return a fresh request-owned
+reviewer implementing `review` and `aclose`. Tests use local doubles, including an
+empty default reviewer fixture for existing API regressions; the production
+default remains `OllamaReviewer` with fixed localhost endpoint and configured caps.
