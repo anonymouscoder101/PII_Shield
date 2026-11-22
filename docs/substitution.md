@@ -86,7 +86,7 @@ preserved as session protocol at this stage.
 
 Use ephemeral helpers inside `with ephemeral_session() as active:` and persistent
 helpers inside `with service.use(id) as active:`. The request scope must remain
-alive through allocation, future send and restoration. Lookup/allocate methods
+alive through allocation, send and restoration. Lookup/allocate methods
 reject closed scopes. After each allocation the helper validates its token and
 confirms registration before inserting it into output text. Persistent mappings
 commit before allocation returns; ephemeral mappings remain in memory only.

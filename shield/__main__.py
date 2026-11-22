@@ -1,4 +1,4 @@
-"""Start the localhost scaffold with validated configuration."""
+"""Start the localhost proxy with validated configuration."""
 
 import argparse
 import logging
@@ -13,7 +13,7 @@ from shield.credentials import CredentialError, load_credentials
 
 def main() -> None:
     """Validate settings before starting the server."""
-    parser = argparse.ArgumentParser(description="PII Shield localhost scaffold")
+    parser = argparse.ArgumentParser(description="PII Shield localhost proxy")
     parser.add_argument(
         "--config", type=Path, help="YAML config file (default: optional ./shield.yaml)"
     )

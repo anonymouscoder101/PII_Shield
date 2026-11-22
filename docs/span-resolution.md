@@ -2,14 +2,14 @@
 
 Phase 3 task 3 adds `shield/detect/resolve.py`. `SpanPolicy` takes a snapshot of
 `DetectionConfig.effective_threshold` and the literal allowlist so the detector
-and future pre-send guard can share one policy. The snapshot holds no source
+and pre-send guard share one policy. The snapshot holds no source
 text; subsequent mutations to a configuration list cannot change its decisions.
 
 Use `Stage1Detector.load(config).analyze(text)` for detection plus resolution,
 or `SpanPolicy(config).resolve(text, candidates)` for already-detected original
 coordinates. `detect(text)` remains available for raw candidate inspection and
 evaluation. [Substitution](substitution.md) and the
-[HTTP analysis endpoint](api-contract.md#local-analysis-endpoint) now use this policy. The future gateway guard must use this same detector/policy configuration.
+[HTTP analysis endpoint](api-contract.md#local-analysis-endpoint) now use this policy. The gateway guard uses the same detector/policy configuration.
 
 ## Decision order
 
@@ -38,12 +38,15 @@ Each merged component uses the union of its accepted bounds. Select a member by
 this ascending tuple:
 
 ```text
-(-confidence, entity_type.value, start, end, stage.value)
+(not_opaque_type, -confidence, entity_type.value, start, end, stage.value)
 ```
 
-The component retains that member's type, confidence and stage. Thus the highest
-confidence wins; exact score ties choose the alphabetically first entity type,
-then earliest start/end, then lexical stage. A component's score is not averaged
+The component retains that member's type, confidence and stage. Accepted opaque
+types (`SECRET`, `API_KEY`, `EMPLOYEE_ID`) take precedence so an overlapping name
+cannot casefold a credential. Within that safety class, the highest confidence
+wins; score ties choose the alphabetically first type, then earliest start/end
+and lexical stage. Without an opaque member, the original highest-confidence
+rule applies. Threshold and allowlist filtering still happen first. A component's score is not averaged
 or boosted. Its stage identifies the winning member, not every contributing
 stage. Output spans are ordered, disjoint, and invariant to candidate input order.
 Presidio's own validation and context enhancement occur before this policy.

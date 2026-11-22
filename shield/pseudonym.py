@@ -11,7 +11,7 @@ from typing import Annotated
 
 from pydantic import Field, SecretBytes, SecretStr
 
-from shield.contracts import Contract, EntityType, NonEmptyString
+from shield.contracts import OPAQUE_ENTITY_TYPES, Contract, EntityType, NonEmptyString
 
 MAX_SUFFIX_LENGTH = 32
 TOKEN_LABELS = MappingProxyType(
@@ -39,9 +39,6 @@ _TEXT_TYPES = frozenset(
         EntityType.DATE_OF_BIRTH,
         EntityType.CONTEXTUAL,
     }
-)
-_OPAQUE_TYPES = frozenset(
-    {EntityType.API_KEY, EntityType.SECRET, EntityType.EMPLOYEE_ID}
 )
 _EXTENSION = re.compile(r"(?:;ext=|ext(?:ension)?\.?|x|#)\s*(\d+)\s*$", re.IGNORECASE)
 
@@ -78,7 +75,7 @@ def _digits(value: str, separators: str) -> str | None:
 
 
 def _normalize(entity: EntityType, value: str) -> str:
-    if entity in _OPAQUE_TYPES:
+    if entity in OPAQUE_ENTITY_TYPES:
         return value
     if entity in _TEXT_TYPES:
         canonical = unicodedata.normalize("NFC", value)

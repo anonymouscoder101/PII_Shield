@@ -58,9 +58,8 @@ returns JSON 408 `request_timeout`, including when the client asked for streamin
 Cancellation propagates to async handlers and runs their `finally` cleanup.
 Synchronous work cannot be forcibly interrupted, but headers arriving after the
 deadline are rejected. Slow response delivery after headers is outside this
-deadline, so future buffered SSE delivery is not truncated by the processing timer.
-These limits do not replace the separate upstream or Stage 2 timeouts implemented
-alongside those clients in later phases.
+deadline, so buffered SSE delivery is not truncated by the processing timer.
+Separate upstream and Stage 2 timeouts bound those clients within this deadline.
 
 No `X-Shield-Session` header selects ephemeral operation, with no vault readiness
 lookup. A supplied header must be nonblank and occur exactly once; invalid header
@@ -69,9 +68,10 @@ forms return 400. Valid persistent selections require both
 unlock. Startup lifespan authenticates the vault when persistence is enabled.
 A supplied unknown ID returns 404; an expired ID is deleted and returns 410 on
 that access. Once cleanup removes an ID, later lookups return 404. Supplied IDs
-never silently fall back to ephemeral sessions. A valid selected session reaches
-the current 503 protection scaffold. Session headers are returned on successful
-creation/metadata responses; error responses expose no session header.
+never silently fall back to ephemeral sessions. A valid selected session is held
+through detection, mapping registration, forwarding and restoration. Session
+headers are returned on successful creation/metadata, analysis and chat responses
+when a persistent session is explicitly selected; errors expose no session header.
 
 ## Request fields
 
@@ -185,8 +185,8 @@ it cannot be replaced with a JSON error at that point.
 ## Startup credentials
 
 The CLI reads the provider key only from the environment variable named by
-`upstream.api_key_env`. A missing key is allowed for the current scaffold and local
-fake upstream; an explicitly empty or whitespace-containing key is rejected.
+`upstream.api_key_env`. A missing key is allowed for unauthenticated local
+upstreams; an explicitly empty or whitespace-containing key is rejected.
 No YAML field, command-line value, or HTTP request field accepts a provider key
 or vault passphrase.
 

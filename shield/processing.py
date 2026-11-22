@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+from contextlib import contextmanager
 from threading import Event
 
 from shield.analysis import AnalysisJob, _CancelledAnalysis
@@ -42,8 +43,16 @@ class ReviewerProvider:
         self.config = config
         self.factory = factory if factory is not None else default_reviewer
         self.available = False  # Last observation, never an active health probe.
+        self._drains = set()
 
-    async def review(self, sources, first, session, detector):
+    def retain_drain(self, operation):
+        # The app owns this provider. Asyncio keeps only weak task references,
+        # so request-local ownership cannot keep a stalled cleanup alive.
+        task = asyncio.create_task(operation)
+        self._drains.add(task)
+        task.add_done_callback(self._drains.discard)
+
+    async def review(self, sources, first, session, detector, *, retain_cleanup=None):
         try:
             result = await review_with_policy(
                 sources,
@@ -53,6 +62,7 @@ class ReviewerProvider:
                 self.config,
                 stage1=first,
                 close_reviewer=True,
+                retain_cleanup=retain_cleanup,
             )
         except Exception:
             self.available = False
@@ -64,10 +74,41 @@ class ReviewerProvider:
 class AsyncSessionJob(AnalysisJob):
     """Bridge each async operation to the application loop without losing leases."""
 
-    def __init__(self, provider, service, session_id):
+    def __init__(self, provider, service, session_id, cleanup_owner):
         super().__init__(provider, service, session_id)
+        self._cleanup_owner = cleanup_owner
         self._loop = asyncio.get_running_loop()
         self._future = None
+        self._cleanup = []
+
+    def retain_cleanup(self, task):
+        self._cleanup.append(task)
+
+    @contextmanager
+    def _session_scope(self):
+        scope = super()._session_scope()
+        state = scope.__enter__()
+        try:
+            yield state
+        finally:
+            # No request work may use mappings after publication. The scope
+            # itself keeps the persistent lease until every async close drains.
+            state.close()
+            if any(not task.done() for task in self._cleanup):
+                self._loop.call_soon_threadsafe(
+                    self._cleanup_owner.retain_drain, self._release_scope(scope)
+                )
+            else:
+                for task in self._cleanup:
+                    if not task.cancelled():
+                        task.exception()
+                scope.__exit__(None, None, None)
+
+    async def _release_scope(self, scope):
+        try:
+            await asyncio.gather(*self._cleanup, return_exceptions=True)
+        finally:
+            scope.__exit__(None, None, None)
 
     def cancel(self):
         super().cancel()
@@ -106,7 +147,7 @@ class AsyncSessionJob(AnalysisJob):
 
 class ModeJob(AsyncSessionJob):
     def __init__(self, provider, service, session_id, reviewer_provider):
-        super().__init__(provider, service, session_id)
+        super().__init__(provider, service, session_id, reviewer_provider)
         self._reviewer_provider = reviewer_provider
 
     def detect_texts(self, sources, session, detector):
@@ -115,7 +156,9 @@ class ModeJob(AsyncSessionJob):
         if self._reviewer_provider.config.mode == "fast":
             return first, None
         batch = self.run_async(
-            lambda: self._reviewer_provider.review(sources, first, session, detector)
+            lambda: self._reviewer_provider.review(
+                sources, first, session, detector, retain_cleanup=self.retain_cleanup
+            )
         )
         if self._cancelled.is_set():
             raise _CancelledAnalysis()

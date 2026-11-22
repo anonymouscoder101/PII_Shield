@@ -104,7 +104,7 @@ class Stage1Detector:
     """Validated registry backed by an explicitly loaded English spaCy pipeline.
 
     One instance serializes calls because its NLP pipeline and recognizers are
-    mutable. Run detection off the event loop when wiring the gateway later.
+    mutable. The gateway runs detection in its session-owning worker thread.
     Registry availability is capability metadata, not a recall guarantee.
     """
 

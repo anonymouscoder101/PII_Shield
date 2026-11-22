@@ -1,92 +1,35 @@
 # PII Shield
 
-A planned single-user localhost proxy that detects sensitive text, replaces it
+A single-user localhost proxy that detects sensitive text, replaces it
 with session-specific tokens before an upstream Chat Completions call, and
 restores known tokens in the response. See [the implementation plan](IMPLEMENTATION_PLAN.md)
 and [the accepted design decisions](docs/decisions/001-session-storage-and-buffered-sse.md).
 
 ## Current status
 
-Phase 1 tasks #1–6 are implemented: the package scaffold, shared typed domain
-contracts, validated configuration, strict Chat Completions schemas, safe errors,
-runtime credential loading, request limits, locked-vault checks, and a separate
-fake upstream with synthetic fixtures.
-Phase 2 tasks #1–6 add an opt-in SQLite storage module with a versioned schema,
-transactional ciphertext inserts, full-digest constraints, Argon2id key derivation,
-an authenticated unlock verifier, and AES-GCM entry
-encryption with authenticated reads. Ephemeral requests receive independent
-memory-only HMAC keys. Optional persistent sessions support startup unlock,
-creation, lookup, restart recovery, TTL enforcement, and deletion.
-See [vault storage](docs/vault-storage.md) for its scope and disk permissions.
-Phase 3 tasks #1–7 add explicit local Stage 1 detection with the pinned spaCy
-English model, an audited Presidio registry, and a numbered-street address
-baseline, labeled birth dates, API keys/secrets, and configurable employee IDs.
-Phone regions and location/address coverage are configurable. Shared span policy
-validates bounds, filters confidence and exact allowlists, and resolves overlaps
-deterministically. Type-specific normalization, HMAC derivation, and atomic
-full-digest token allocation are available in [pseudonyms](docs/pseudonyms.md).
-[Text substitution](docs/substitution.md) preserves original offsets and exact
-registered session tokens. See [Stage 1 detection](docs/stage1-detection.md) for supported types
-and coverage limits.
-Phase 4 task #1 adds conversation preparation in `shield/gateway.py`, wired into
-`/v1/chat/completions`. Every system, developer, user, and assistant message is
-sanitized in the active session, including restored PII in prior assistant replies.
-Prepared requests preserve generation options and force non-streaming upstream
-mode. Client stream preferences remain on the original request for buffered SSE delivery.
-Phase 4 task #2 freezes the outgoing JSON bytes after mapping registration and
-runs a read-only Stage 1 guard on every decoded string value, including `model`.
-Known session tokens are recognized; JSON escapes are decoded before detection.
-Persistent allocations are committed before this scan; ephemeral mappings stay
-in memory. Phase 4 task #3 blocks remaining accepted, non-allowlisted PII with
-422 `protection_blocked`, including PII in the model field.
-Phase 4 task #4 adds the separately tested async `UpstreamClient` in
-`shield/upstream.py`: verified HTTPS, configured phase and total timeouts,
-static errors, response validation, and one attempt per call (no automatic
-retries or redirects). It sends the exact guarded JSON bytes. See
-[upstream transport](docs/api-contract.md#upstream-transport) for its lifecycle
-and cost policy.
-Phase 4 task #5 adds `shield/rehydrate.py` for exact and deterministic formatting
-variants of known tokens, using only the active session's authenticated mappings.
-See [response restoration](docs/api-contract.md#response-restoration).
-Phase 4 task #6 connects the protected round trip. Both client modes fetch a full
-upstream completion with `stream: false`, restore content and refusal text for
-all choices, then deliver JSON or buffered SSE. SSE emits role/text deltas,
-finish-reason chunks, optional usage, and `[DONE]`, preserving IDs and choice
-indices. First-byte latency includes the full upstream completion and restoration;
-usage counts describe the tokenized exchange. Session cleanup completes before
-success headers; cancellation keeps persistent leases until HTTP cleanup drains.
-Phase 4 task #7 adds `X-Shield-Report` with protected occurrence counts, separate
-allowlisted-disclosure counts, and unknown response-token counts. Unknown tokens
-stay unchanged; `X-Shield-Session` is returned only for an explicitly selected
-persistent session. Both JSON and SSE are fully restored and serialized before
-ephemeral state is released.
-Phase 4 task #8 adds structured, count-only request metrics and safe exception
-coverage for uploads and response delivery. The CLI disables access logs and
-emits JSON telemetry without URLs, session IDs, credentials, bodies, or reviewer
-reasons. See [private metrics and logging](docs/api-contract.md#private-metrics-and-logging).
-Phase 4 task #9 adds `GET /shield/health`, a local liveness and capability snapshot
-with ephemeral support, optional-vault lock state, Stage 1 loading state, and
-Stage 2 availability. It does not load models or contact upstream services.
-See [health status](docs/api-contract.md#health-status).
-Phase 5 task #1 adds an optional LangChain/Ollama reviewer interface and a local
-latency benchmark. The final adapter measured an
-8.14 s first call after model unload and a 4.35 s warm median on this M1 Pro;
-the initial provisioning call took 24.85 s. See
-[local reviewer setup](docs/local-reviewer.md) for installation, privacy controls,
-measurement details, and the cold-start timeout limitation.
-Phase 5 task #2 adds a Stage 1-masked reviewer handoff and exact source-coordinate
-mapping. Placeholder-overlapping spans are unmappable; raw reviewer output stays
-untrusted until validated. Phase 5 task #3 adds strict structured-output validation,
-exact quote/position checks, source mapping, and merged Stage 1/Stage 2 plans,
-including the `CONTEXTUAL` entity type. Phase 5 task #4 enforces additive-only
-merging with an authoritative Stage 1 baseline and isolates reviewer document
-content in a JSON data envelope. Phase 5 task #5 bounds reviewer responses and
-contextual batch time, fails closed by default, and exposes explicit Stage 1-only
-fallback outcomes through delivery headers and private metrics. Phase 5 task #6
-connects both chat and analysis to mode selection. `fast` is
-Stage 1-only and never constructs a reviewer. `balanced` (default) and `paranoid`
-require the local reviewer; accepted additions are masked before the exact-byte
-final guard. Stage 2 outages fail closed unless fallback is explicitly enabled.
+Phases 1–5 provide the protected text-only Chat Completions pipeline, local
+analysis, optional encrypted persistent sessions, and local contextual review.
+Every supported message role is sanitized; the final guard checks every decoded
+string in the exact outgoing JSON. Accepted detections use session-specific HMAC
+tokens with full-digest identity and atomic collision handling. Responses restore
+only active-session mappings, with ordinary JSON or buffered SSE delivery.
+
+Ephemeral sessions are the default and persist no keys or mappings. Optional
+persistent sessions use Argon2id, authenticated AES-GCM storage, explicit request
+leases, restart recovery, TTL enforcement and deletion. Reports separate protected
+occurrences, intentional allowlist disclosures and unknown response tokens.
+Logs contain fixed metadata and counts, with no bodies or reviewer reasons.
+
+`fast` uses Stage 1 only and never constructs a reviewer. `balanced` (default) and
+`paranoid` require the local Ollama reviewer. Structured additions must match
+quoted text and exact source coordinates and cannot alter accepted Stage 1 spans.
+Stage 2 failures fail closed unless Stage 1 fallback is explicitly enabled.
+Detection misses remain possible; fixture success is not a privacy guarantee.
+
+The [offline JSON/SSE demo](demo/README.md), [synthetic generator and threshold
+pilot](eval/README.md), and [phase completion review](docs/phase-1-5-review.md)
+provide reproducible verification. The full Phase 6 experiments, external dataset
+loaders, and paper/poster artifacts remain pending.
 
 ## Setup with uv
 
@@ -136,7 +79,7 @@ local Ollama model as described in [reviewer setup](docs/local-reviewer.md).
 For Stage 1-only operation, set `detection.mode: fast` in `shield.yaml`. Missing
 reviewer dependencies/model availability return 503 in Stage 2 modes by default.
 
-## Run the scaffold
+## Run the proxy
 
 ```sh
 uv run --locked pii-shield
@@ -208,13 +151,13 @@ timeouts/TTL, and invalid ports fail with field-specific errors that omit input
 values. Empty documents are rejected; use `{}` to select all defaults. The server
 host must be `127.0.0.1`; `server.port` may be changed. Upstream URLs must use HTTP
 or HTTPS without credentials, queries, fragments, or whitespace. The default URL
-reserves `127.0.0.1:8001/v1` for the future fake upstream.
+uses `127.0.0.1:8001/v1` for the local fake upstream.
 
 `detection.threshold` is optional: `config.detection.effective_threshold` resolves
 to fast=0.6, balanced=0.5, or paranoid=0.3 unless an explicit threshold in [0, 1]
 overrides it, including zero. Allowlist terms preserve their exact spelling and
 must be nonblank strings. Stage 2 model, timeout, and failure-policy settings are
-validated but no reviewer is loaded yet.
+validated during configuration; the reviewer is constructed lazily in Stage 2 modes.
 
 Vault paths expand `~`; relative paths resolve beside the YAML file. The loader
 creates no files or directories and does not open or unlock a vault. Session TTL
@@ -246,7 +189,7 @@ startup initializes or unlocks the vault; creation and lookup expose session
 metadata while unknown, expired or deleted IDs fail without replacement.
 
 The CLI reads provider credentials from the environment variable named by
-`api_key_env`; a missing key is allowed for this scaffold. Setting
+`api_key_env`; a missing key is allowed for unauthenticated local upstreams. Setting
 `sessions.persistent_enabled: true` collects a passphrase through a non-echoing
 startup prompt and fails if echo cannot be disabled. Lifespan authenticates the
 vault before serving and releases the startup passphrase reference. Default
@@ -257,22 +200,20 @@ logs, generated datasets, and evaluation results are ignored by Git.
 ## Project layout
 
 ```text
-shield/                 Python runtime package and ASGI scaffold
-  detect/               Future detection and span-resolution modules
-eval/                   Future detection/utility experiments and plots
-  datasets/             Synthetic generators, fixtures, and loaders
-tests/                  Future unit, integration, and property tests
-demo/                   Future scripted synthetic round-trip demo
+shield/                 Protected ASGI proxy, sessions, vault, tokens and restoration
+  detect/               Stage 1, local contextual review and shared span policy
+eval/                   Synthetic generator and Stage 1 threshold/utility pilot
+  datasets/             Synthetic fixtures and generated ground truth
+tests/                  Unit, integration, and property tests
+demo/                   Offline synthetic JSON and buffered SSE round trip
 docs/decisions/          Accepted architecture decisions
-shield.example.yaml     Proposed configuration example
+shield.example.yaml     Validated configuration example
 pyproject.toml          Package, dependencies, and tool configuration
 uv.lock                 Reproducible dependency resolution
 .python-version         Exact interpreter pin
 ```
 
-The design's `session.py`, `vault.py`, `pseudonym.py`,
-`rehydrate.py`, detector modules, and evaluation scripts will be added as their
-implementation tasks are completed.
+The full E1–E6 evaluation suite and external dataset loaders belong to Phase 6.
 
 ## Shared contracts
 
@@ -333,9 +274,11 @@ finish, including restoration. Pruning skips busy sessions; a subsequent idle
 lookup enforces expiry. Shutdown refuses new scopes and releases the vault key
 and ownership only after existing scopes exit.
 
-Within a request scope, add new mappings to `active.mappings` and use
-`await active.send(callback)` for the future gateway send: it commits pending
-mappings before invoking the callback, and never calls it if commit fails. Use
+Within a request scope, `active.allocate(...)` commits each persistent mapping
+before returning its token. The gateway finishes all allocations and the final
+guard before sending the frozen payload. For manually staged `active.mappings`,
+`await active.send(callback)` commits the pending batch before invoking the
+callback and never calls it if commit fails. Use
 `active.read_mapping(token)` while the scope is held. Keep the scope open through
 restoration, then exit to release its key and mappings. Standalone service calls
 for that session are competing operations; they cannot reenter an active scope.

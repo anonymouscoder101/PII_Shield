@@ -351,8 +351,9 @@ async def test_persistent_contextual_mapping_committed_before_send_and_restored(
 
 
 @pytest.mark.parametrize("endpoint", ["chat", "analyze"])
+@pytest.mark.parametrize("review_result", ["blocked", "success"])
 async def test_cancelled_review_keeps_lease_until_reviewer_cleanup(
-    tmp_path, monkeypatch, endpoint
+    tmp_path, monkeypatch, endpoint, review_result
 ):
     import asyncio
     from contextlib import contextmanager
@@ -367,7 +368,9 @@ async def test_cancelled_review_keeps_lease_until_reviewer_cleanup(
     class Blocked(Reviewer):
         async def review(self, text):
             entered.set()
-            await asyncio.Event().wait()
+            if review_result == "blocked":
+                await asyncio.Event().wait()
+            return SecretStr('{"spans":[]}')
 
         async def aclose(self):
             cleaning.set()
@@ -420,6 +423,8 @@ async def test_cancelled_review_keeps_lease_until_reviewer_cleanup(
             )
             try:
                 await asyncio.wait_for(entered.wait(), 1)
+                if review_result == "success":
+                    await asyncio.wait_for(cleaning.wait(), 1)
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await task
@@ -488,3 +493,233 @@ async def test_cleanup_fault_never_overrides_caller_cancellation():
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+
+@pytest.mark.parametrize("endpoint", ["chat", "analyze"])
+@pytest.mark.parametrize("policy", ["fail_closed", "fail_open"])
+@pytest.mark.parametrize("review_result", ["blocked", "success", "error"])
+async def test_stage2_deadline_publishes_before_cleanup_and_retains_lease(
+    tmp_path, monkeypatch, endpoint, policy, review_result
+):
+    import asyncio
+    from contextlib import contextmanager
+    from threading import Event
+
+    from shield.config import Argon2Config, SessionsConfig, VaultConfig
+    from shield.credentials import RuntimeCredentials
+
+    cleaning, release = asyncio.Event(), asyncio.Event()
+    drained = Event()
+
+    class SlowClose(Reviewer):
+        async def review(self, text):
+            if review_result == "blocked":
+                await asyncio.Event().wait()
+            if review_result == "error":
+                raise RuntimeError("private reviewer failure")
+            return SecretStr('{"spans":[]}')
+
+        async def aclose(self):
+            cleaning.set()
+            await release.wait()
+            if review_result == "error":
+                raise RuntimeError("private cleanup failure")
+
+    config = ShieldConfig(
+        detection=DetectionConfig(stage2_timeout_s=0.02, on_stage2_failure=policy),
+        sessions=SessionsConfig(persistent_enabled=True),
+        vault=VaultConfig(
+            path=tmp_path / "vault.db",
+            argon2=Argon2Config(memory_kib=32, time_cost=1, parallelism=1),
+        ),
+    )
+    upstream = create_fake_upstream()
+    app = create_app(
+        config,
+        RuntimeCredentials(vault_passphrase=SecretStr("synthetic")),
+        detector_factory=Detector,
+        reviewer_factory=lambda config: SlowClose(),
+        upstream_transport=httpx.ASGITransport(app=upstream),
+    )
+    async with app.router.lifespan_context(app):
+        original = app.state.vault.use
+
+        @contextmanager
+        def captured(sid):
+            try:
+                with original(sid) as state:
+                    yield state
+            finally:
+                drained.set()
+
+        monkeypatch.setattr(app.state.vault, "use", captured)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as api:
+            sid = (await api.post("/shield/sessions", json={})).json()["session_id"]
+            path = (
+                "/shield/analyze" if endpoint == "analyze" else "/v1/chat/completions"
+            )
+            payload = (
+                {"text": "Alice"}
+                if endpoint == "analyze"
+                else {
+                    "model": "synthetic",
+                    "messages": [{"role": "user", "content": "Alice"}],
+                }
+            )
+            request = asyncio.create_task(
+                api.post(path, headers={"X-Shield-Session": sid}, json=payload)
+            )
+            try:
+                await asyncio.wait_for(cleaning.wait(), 1)
+                done, _ = await asyncio.wait((request,), timeout=0.3)
+                assert request in done, "Stage 2 deadline waited for reviewer cleanup"
+                response = request.result()
+                assert response.status_code == (200 if policy == "fail_open" else 503)
+                if policy == "fail_open":
+                    assert response.headers["x-shield-stage2"] == "stage1_fallback"
+                    assert response.headers["x-shield-stage2-failure"] == "timeout"
+                    if endpoint == "chat":
+                        assert len(upstream.state.captures) == 1
+                        assert "Alice" not in upstream.state.captures[0].body.decode()
+                    else:
+                        assert "Alice" not in response.json()["sanitized_text"]
+                else:
+                    assert response.json()["error"]["code"] == "reviewer_unavailable"
+                    assert not upstream.state.captures
+                assert not drained.is_set()
+                assert (await api.delete(f"/shield/sessions/{sid}")).status_code == 409
+            finally:
+                release.set()
+                await asyncio.wait_for(request, 1)
+                assert await asyncio.to_thread(drained.wait, 1)
+            assert (await api.delete(f"/shield/sessions/{sid}")).status_code == 204
+
+
+@pytest.mark.parametrize("failure", ["session", "guard"])
+async def test_cleanup_deadline_cannot_replace_session_or_guard_failure(failure):
+    import asyncio
+
+    from shield.contracts import ErrorCode
+    from shield.detect.review_policy import review_with_policy
+    from shield.errors import ShieldError
+    from shield.persistent import SessionAccessError
+    from shield.session import ephemeral_session
+
+    retained, release = [], asyncio.Event()
+    error = (
+        SessionAccessError(ErrorCode.SESSION_EXPIRED)
+        if failure == "session"
+        else ShieldError(ErrorCode.PROTECTION_BLOCKED)
+    )
+
+    class Failed(Reviewer):
+        async def review(self, text):
+            raise error
+
+        async def aclose(self):
+            await release.wait()
+
+    with ephemeral_session() as state:
+        try:
+            with pytest.raises(type(error)) as caught:
+                await review_with_policy(
+                    ("Alice",),
+                    state,
+                    Detector(DetectionConfig()),
+                    Failed(),
+                    DetectionConfig(
+                        stage2_timeout_s=0.01, on_stage2_failure="fail_open"
+                    ),
+                    close_reviewer=True,
+                    retain_cleanup=retained.append,
+                )
+            assert caught.value.code == error.code
+        finally:
+            release.set()
+            await asyncio.gather(*retained, return_exceptions=True)
+
+
+@pytest.mark.parametrize("policy", ["fail_closed", "fail_open"])
+async def test_overdue_cleanup_and_session_lease_survive_garbage_collection(
+    tmp_path, monkeypatch, policy
+):
+    import asyncio
+    import gc
+    import weakref
+    from contextlib import contextmanager
+    from threading import Event
+
+    from shield.config import Argon2Config, SessionsConfig, VaultConfig
+    from shield.credentials import RuntimeCredentials
+
+    cleaning, completed, drained = asyncio.Event(), asyncio.Event(), Event()
+    waiters = []
+
+    class UnrootedClose(Reviewer):
+        async def review(self, text):
+            await asyncio.Event().wait()
+
+        async def aclose(self):
+            release = asyncio.Event()
+            waiters.append(weakref.ref(release))
+            cleaning.set()
+            await release.wait()
+            completed.set()
+
+    app = create_app(
+        ShieldConfig(
+            detection=DetectionConfig(stage2_timeout_s=0.01, on_stage2_failure=policy),
+            sessions=SessionsConfig(persistent_enabled=True),
+            vault=VaultConfig(
+                path=tmp_path / "vault.db",
+                argon2=Argon2Config(memory_kib=32, time_cost=1, parallelism=1),
+            ),
+        ),
+        RuntimeCredentials(vault_passphrase=SecretStr("synthetic")),
+        detector_factory=Detector,
+        reviewer_factory=lambda config: UnrootedClose(),
+    )
+    async with app.router.lifespan_context(app):
+        original = app.state.vault.use
+
+        @contextmanager
+        def captured(sid):
+            try:
+                with original(sid) as state:
+                    yield state
+            finally:
+                drained.set()
+
+        monkeypatch.setattr(app.state.vault, "use", captured)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as api:
+            sid = (await api.post("/shield/sessions", json={})).json()["session_id"]
+            response = await asyncio.wait_for(
+                api.post(
+                    "/shield/analyze",
+                    headers={"X-Shield-Session": sid},
+                    json={"text": "Alice"},
+                ),
+                1,
+            )
+            assert response.status_code == (200 if policy == "fail_open" else 503)
+            await asyncio.wait_for(cleaning.wait(), 1)
+            del response
+            await asyncio.sleep(0)
+            gc.collect()
+            try:
+                assert not drained.is_set(), (
+                    "GC released a session with pending cleanup"
+                )
+                assert not completed.is_set()
+                assert (await api.delete(f"/shield/sessions/{sid}")).status_code == 409
+            finally:
+                release = waiters[0]()
+                if release is not None:
+                    release.set()
+                    assert await asyncio.to_thread(drained.wait, 1)
+            assert completed.is_set()
+            assert (await api.delete(f"/shield/sessions/{sid}")).status_code == 204

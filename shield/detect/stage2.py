@@ -1,6 +1,6 @@
-"""Optional local reviewer transport. Output remains untrusted until later stages.
+"""Optional local reviewer transport; output requires schema/source validation.
 
-No application route imports or invokes this adapter yet. It never pulls models.
+Balanced/paranoid mode processing invokes this adapter lazily. It never pulls models.
 """
 
 import asyncio

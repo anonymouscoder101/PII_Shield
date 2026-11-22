@@ -9,7 +9,7 @@ relative vault paths, localhost binding, and CLI startup/error behavior without
 starting a server or contacting an upstream.
 
 `test_api.py` checks nested field rejection, strict text content and scalar types,
-response/stream schemas, safe HTTP errors, and the blocked chat scaffold using an
+response/stream schemas, safe HTTP errors, and protected chat using an
 in-process HTTPX transport. `test_credentials.py` checks environment-only provider
 keys, masked runtime state, opt-in passphrase prompting, and failure before any
 echoed fallback input or server startup.
@@ -196,3 +196,15 @@ cached health state, delayed reviewer cleanup leases, and cleanup timeout/cancel
 precedence. `conftest.py` supplies an empty reviewer only as the default application
 test double; explicit mode tests and SDK mocks exercise their own behaviors. No
 ordinary test depends on an Ollama daemon; live inference uses the benchmark.
+
+
+`test_demo.py` runs the executable offline JSON/SSE demo using the real local
+Stage 1 model, with outbound sockets forbidden. `test_evaluation.py` checks
+seeded synthetic ground truth, Unicode/repeated offsets, matching and disclosure
+scoring, utility denominators, and a small real-detector/fake-upstream pilot.
+The full experiment suite remains Phase 6 work.
+
+The completion review adds name-shaped secret identity and transitive opaque
+overlap regressions, plus Stage 2 cleanup deadline/lease tests under caller
+cancellation and forced garbage collection. Live local reviewer API smoke
+observations are recorded separately in `docs/phase-1-5-review.md`.

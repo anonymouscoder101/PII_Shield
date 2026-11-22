@@ -35,6 +35,24 @@ def test_adjacent_spans_stay_separate_and_ordered():
     assert result.spans == (span(0, 3), span(3, 6))
 
 
+@pytest.mark.parametrize(
+    "opaque", [EntityType.SECRET, EntityType.API_KEY, EntityType.EMPLOYEE_ID]
+)
+def test_opaque_overlap_keeps_exact_identity_despite_higher_confidence_name(opaque):
+    candidates = [span(0, 8, score=0.99), span(2, 5, opaque, 0.7)]
+    for ordered in permutations(candidates):
+        result = SpanPolicy().resolve("abcdefgh", ordered)
+        assert result.spans == (span(0, 8, opaque, 0.7),)
+
+
+def test_transitive_opaque_overlap_cannot_be_lost_to_a_stronger_bridge():
+    result = SpanPolicy().resolve(
+        "abcdefghij",
+        [span(0, 3, EntityType.SECRET, 0.7), span(2, 7), span(6, 10, score=1.0)],
+    )
+    assert result.spans == (span(0, 10, EntityType.SECRET, 0.7),)
+
+
 def test_low_confidence_bridge_and_outer_span_cannot_enlarge_redaction():
     result = SpanPolicy(DetectionConfig(threshold=0.5)).resolve(
         "abcdefghijkl",

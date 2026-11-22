@@ -141,12 +141,12 @@ bounds and malformed source-map construction raise static `SourceMapError`.
 Empty inputs have an empty map. Mapping remains correct after multiple token
 expansions/contractions, repeated tokens and Unicode prefixes.
 
-This strict map is for future reviewer additions, which must refer to intact
+This strict map is used for reviewer additions, which must refer to intact
 source text. It intentionally differs from the gateway's permissive interval
 projection used solely to reconcile partially visible allowlist disclosures.
 The validation layer below checks schema, exact text, bounds, unambiguous mapping
-and original text equality before accepting any contextual span. Public chat and
-analysis behavior remain unchanged until mode orchestration is connected.
+and original text equality before accepting any contextual span. Both chat and
+analysis use this validation in balanced and paranoid modes.
 
 ## Structured output validation and merging
 
@@ -187,11 +187,11 @@ count. Discard counts concern invalid ranges/quotes/maps; below-threshold counts
 are separately carried by the resolved plan. Duplicate removal does not increment
 the invalid-candidate count. Raw quotes and reasons are not present in results.
 
-Validation allocates no tokens and does not apply additional substitutions yet.
-The `CONTEXTUAL` type has its own token label, text normalization and HMAC domain,
-so later substitution can use the existing session/vault machinery. Stage 1's
-recognizer registry remains unchanged. Public mode routing, second-stage masking,
-final guard orchestration and failure-policy behavior follow in later tasks.
+Validation allocates no tokens; mode processing applies the accepted plans
+through the existing session/vault machinery before the final guard. The
+`CONTEXTUAL` type has its own token label, text normalization and HMAC domain.
+Stage 1's recognizer registry remains unchanged. Both public analysis and chat
+use the configured contextual failure policy.
 
 ## Additive-only review and instruction boundaries
 
@@ -340,3 +340,21 @@ receives validated `DetectionConfig` and should return a fresh request-owned
 reviewer implementing `review` and `aclose`. Tests use local doubles, including an
 empty default reviewer fixture for existing API regressions; the production
 default remains `OllamaReviewer` with fixed localhost endpoint and configured caps.
+
+
+## Deadline completion and cleanup
+
+The Stage 2 batch deadline includes review, validation and reviewer close. API
+mode processing returns the configured failure or Stage 1 fallback when that
+budget expires. Overdue asynchronous reviewer cleanup is retained by an
+application-owned drain registry, including across garbage collection. Request
+state is closed before publication, while a persistent session's exclusive lease
+stays held until cleanup drains; competing access returns `409 session_busy`.
+Caller cancellation and session/guard errors take precedence over cleanup errors.
+Standalone `review_with_policy` callers without a lifetime-retention callback
+conservatively drain cleanup before returning, since they own their session
+context. Cooperative deadlines cannot interrupt synchronous blocking code.
+
+The [completion review](phase-1-5-review.md#local-reviewer-api-smoke-check) also
+records a final live API smoke check using only synthetic text. Its 503 and 200
+observations supplement controlled tests and do not establish contextual recall.

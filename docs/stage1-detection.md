@@ -4,9 +4,9 @@ Phase 3 tasks 1–3 provide `shield/detect/stage1.py`. The detector returns cand
 `DetectedSpan` objects with Python string offsets, entity types, confidence
 scores and `stage1`; it retains no source values in the returned contracts.
 `detect(text)` returns raw candidates; `analyze(text)` applies shared confidence,
-allowlist and overlap policy. Neither operation yet tokenizes or forwards requests.
-See [span resolution](span-resolution.md) for exact ordering and report semantics. The chat route continues to
-return 503 and makes no provider calls.
+allowlist and overlap policy. Token substitution and the chat pipeline consume
+these results before forwarding guarded payloads. See
+[span resolution](span-resolution.md) for ordering and report semantics.
 
 ## Setup and explicit loading
 

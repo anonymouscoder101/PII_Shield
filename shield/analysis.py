@@ -133,11 +133,7 @@ class AnalysisJob:
     ):
         if self._cancelled.is_set():
             return None
-        scope = (
-            ephemeral_session()
-            if self._session_id is None
-            else self._service.use(self._session_id)
-        )
+        scope = self._session_scope()
         try:
             with scope as state:
                 with self._lock:
@@ -167,6 +163,13 @@ class AnalysisJob:
         finally:
             with self._lock:
                 self._state = None
+
+    def _session_scope(self):
+        return (
+            ephemeral_session()
+            if self._session_id is None
+            else self._service.use(self._session_id)
+        )
 
     def _process(self, text, session, detector):
         result = sanitize_text(text, session, detector)

@@ -21,7 +21,9 @@ Allocation uses the selected session store, as described below.
 
 Names/places keep punctuation and diacritics. No address-abbreviation expansion,
 accent removal or NFKC compatibility folding is performed. An explicit type
-controls the rule; a credential is never routed through general name casefolding.
+controls the rule. Overlap resolution gives accepted opaque credential types
+precedence over text types, even at a lower accepted confidence. This preserves
+exact identity for a credential that also resembles a person or location.
 Employee detection may match case-insensitively, but its identifier's identity
 remains case-sensitive unless a later explicit policy changes that decision.
 
@@ -174,7 +176,7 @@ No full digests or original values belong in upstream payloads or metrics.
 [Text substitution](substitution.md) now applies allocated tokens while keeping
 original coordinates and exact known session placeholders. The
 [analysis HTTP endpoint](api-contract.md#local-analysis-endpoint) now uses this
-allocator; protected upstream forwarding remains a later task.
+allocator; protected upstream forwarding uses the same active session.
 
 Phase 5 task 3 adds `CONTEXTUAL` for identifying descriptions found by the local
 reviewer. It uses text normalization and its own HMAC domain/token label. It is

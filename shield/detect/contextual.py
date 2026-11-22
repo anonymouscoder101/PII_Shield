@@ -1,4 +1,4 @@
-"""Stage 1 masked handoff; review output is not yet eligible for redaction."""
+"""Stage 1 masked handoff; raw output requires validation before redaction."""
 
 from collections.abc import Iterable
 
@@ -31,7 +31,7 @@ async def review_texts(
 
     The caller owns the session, loaded detector and reviewer through this call.
     Raw output stays secret/untrusted; no reviewer additions or policy decisions
-    are made here. Application mode routing follows after validation exists.
+    are made here; mode processing uses validated plans for final substitution.
     """
     results = sanitize_texts(texts, session, detector)
     reviewed = []
@@ -58,7 +58,7 @@ async def review_and_resolve_texts(
     detector: CandidateDetector,
     reviewer: Reviewer,
 ):
-    """Return validated merged plans; application routing/substitution follow later."""
+    """Return validated merged plans for application routing/substitution."""
     from shield.detect.review_validation import validate_review
 
     sources = tuple(texts)

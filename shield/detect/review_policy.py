@@ -49,6 +49,29 @@ def _ensure_open(session):
         raise ShieldError(ErrorCode.INTERNAL_ERROR) from None
 
 
+async def _close_reviewer(reviewer, deadline, retain_cleanup):
+    """Keep cleanup alive beyond the deadline only under a session-scope owner."""
+    task = asyncio.create_task(reviewer.aclose())
+    try:
+        remaining = max(0, deadline - asyncio.get_running_loop().time())
+        done, _ = await asyncio.wait((task,), timeout=remaining)
+    except BaseException:
+        if retain_cleanup is not None:
+            retain_cleanup(task)
+        else:
+            await asyncio.gather(task, return_exceptions=True)
+        raise
+    if task not in done:
+        if retain_cleanup is not None:
+            retain_cleanup(task)
+        else:
+            # Standalone callers own their session context. Do not abandon a
+            # cleanup coroutine when that context cannot retain its lifetime.
+            await asyncio.gather(task, return_exceptions=True)
+        raise TimeoutError()
+    task.result()
+
+
 async def review_with_policy(
     texts,
     session,
@@ -58,11 +81,14 @@ async def review_with_policy(
     *,
     stage1=None,
     close_reviewer=False,
+    retain_cleanup=None,
 ) -> ReviewBatch:
     """Bound the entire contextual batch after Stage 1, including validation.
 
     Stage 1/storage failures never enter fail_open. A failed contextual batch
-    discards every partial addition. Cancellation always propagates.
+    discards every partial addition. Cancellation always propagates. API jobs
+    retain overdue cleanup with their session scope; standalone callers drain
+    cleanup before returning so it cannot outlive their session context.
     """
     sources = tuple(texts)
     first = sanitize_texts(sources, session, detector) if stage1 is None else stage1
@@ -72,8 +98,9 @@ async def review_with_policy(
     deadline = loop.time() + config.stage2_timeout_s
     plans, used = [], 0
     try:
-        async with asyncio.timeout_at(deadline):
-            try:
+        error = None
+        try:
+            async with asyncio.timeout_at(deadline):
                 for original, result in zip(sources, first, strict=True):
                     if loop.time() >= deadline:
                         raise TimeoutError()
@@ -101,20 +128,26 @@ async def review_with_policy(
                     plans.append(plan)
                     if loop.time() >= deadline:
                         raise TimeoutError()
-            except BaseException:
-                if close_reviewer:
-                    try:
-                        await reviewer.aclose()
-                    except Exception:
-                        # Cleanup cannot replace cancellation, a session/guard
-                        # error, or the original review failure with fallback.
-                        pass
+        except BaseException as caught:
+            error = caught
+        if close_reviewer:
+            try:
+                await _close_reviewer(reviewer, deadline, retain_cleanup)
+            except asyncio.CancelledError:
                 raise
-            else:
-                if close_reviewer:
-                    await reviewer.aclose()
-                if loop.time() >= deadline:
-                    raise TimeoutError()
+            except Exception as caught:
+                # A guard/session failure or cancellation always takes priority
+                # over cleanup and cannot be converted into Stage 1 fallback.
+                if error is None or (
+                    isinstance(caught, TimeoutError)
+                    and isinstance(error, Exception)
+                    and not isinstance(error, (ShieldError, SessionAccessError))
+                ):
+                    error = caught
+        if error is not None:
+            raise error
+        if loop.time() >= deadline:
+            raise TimeoutError()
     except ShieldError, SessionAccessError:
         raise
     except Exception as error:

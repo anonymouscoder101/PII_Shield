@@ -1,0 +1,32 @@
+{
+  "measured_at_utc": "2026-11-22T06:05:02.467115+00:00",
+  "command": "See docs/phase-1-5-review.md, Local reviewer API smoke check",
+  "model": "llama3.1:8b",
+  "model_digest": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
+  "python": "3.14.8",
+  "synthetic_text": "Email synthetic.person@example.test. Note: the sole lighthouse keeper on our fictional lunar outpost.",
+  "samples": [
+    {
+      "status": 503,
+      "elapsed_s": 10.47966,
+      "stage2_timeout_s": 60.0,
+      "stage_counts": {},
+      "protected_count": null,
+      "error_code": "reviewer_unavailable",
+      "stage2_available": false
+    },
+    {
+      "status": 200,
+      "elapsed_s": 5.444793,
+      "stage2_timeout_s": 10.0,
+      "stage_counts": {
+        "stage1": 2
+      },
+      "protected_count": 2,
+      "error_code": null,
+      "stage2_available": true
+    }
+  ],
+  "notes": "In-process HTTP analysis with real Stage1 and local Ollama; no provider or cloud call. First sample allows cold loading. Counts only; no reviewer output retained. Small smoke test, not contextual recall evaluation. The first 503 failure subtype was not retained; no cause is inferred. The successful call returned no accepted Stage 2 additions. Concurrent development workload; latency is indicative.",
+  "package_version": "0.1.0"
+}

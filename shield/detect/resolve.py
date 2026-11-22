@@ -6,7 +6,13 @@ from collections import Counter
 from collections.abc import Iterable
 
 from shield.config import DetectionConfig
-from shield.contracts import Contract, Count, DetectedSpan, ProtectionReport
+from shield.contracts import (
+    OPAQUE_ENTITY_TYPES,
+    Contract,
+    Count,
+    DetectedSpan,
+    ProtectionReport,
+)
 
 
 class SpanResolutionError(ValueError):
@@ -28,6 +34,9 @@ class ResolvedDetections(Contract):
 
 def _winner_key(span: DetectedSpan) -> tuple:
     return (
+        # A name-like credential must never inherit lossy name normalization.
+        # Threshold/allowlist filtering has already accepted this evidence.
+        span.entity_type not in OPAQUE_ENTITY_TYPES,
         -span.confidence,
         span.entity_type.value,
         span.start,
@@ -101,7 +110,7 @@ def _report(
 
 
 class SpanPolicy:
-    """Snapshot policy once for reuse by detection and the future pre-send guard.
+    """Snapshot policy once for reuse by detection and the pre-send guard.
 
     The allowlist compares exact whole candidate values, with no normalization,
     case folding, whitespace trimming, substring search or regex interpretation.

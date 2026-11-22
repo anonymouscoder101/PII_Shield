@@ -1,7 +1,7 @@
 """Prepare the supported text-only conversation within an active session.
 
 This stage performs no network I/O. It registers mappings and scans the exact
-serialized payload and blocks remaining accepted PII. Transport follows later.
+serialized payload and blocks remaining accepted PII before chat transport.
 """
 
 from collections import Counter

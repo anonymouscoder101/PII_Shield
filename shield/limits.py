@@ -14,7 +14,7 @@ class RequestLimitsMiddleware:
 
     Checking actual bytes covers absent/false Content-Length and chunked uploads.
     The timeout includes upload, validation, and processing until response headers;
-    it is disabled for body delivery, including future buffered SSE. Cancellation
+    it is disabled for body delivery, including buffered SSE. Cancellation
     propagates into the handler so its finally blocks can release request state.
     """
 

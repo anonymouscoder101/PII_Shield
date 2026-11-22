@@ -17,6 +17,8 @@ from shield.detect.stage1 import (
     Stage1DetectionError,
     Stage1Detector,
 )
+from shield.session import ephemeral_session
+from shield.substitute import sanitize_text
 
 
 @pytest.fixture(scope="module")
@@ -96,6 +98,24 @@ def test_unicode_repetition_and_no_source_values_in_spans(detector):
 def test_empty_and_clean_text(detector):
     assert detector.detect("") == []
     assert detector.detect("Please summarize these general ideas.") == []
+
+
+def test_name_shaped_secrets_keep_case_sensitive_identity_and_restoration(detector):
+    with ephemeral_session() as state:
+        first = sanitize_text('password="Mary Johnson"', state, detector)
+        second = sanitize_text('password="MARY JOHNSON"', state, detector)
+        one, two = first.replacements[0], second.replacements[0]
+        assert one.token != two.token
+        assert not two.reused
+        assert one.span.entity_type == two.span.entity_type == EntityType.SECRET
+        assert (
+            state.read_mapping(one.token).original_value.get_secret_value()
+            == "Mary Johnson"
+        )
+        assert (
+            state.read_mapping(two.token).original_value.get_secret_value()
+            == "MARY JOHNSON"
+        )
 
 
 def test_detection_does_not_use_network_or_leak_debug_context(

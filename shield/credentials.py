@@ -35,9 +35,9 @@ def prompt_vault_passphrase() -> SecretStr:
 
 
 def load_credentials(config: ShieldConfig) -> RuntimeCredentials:
-    """An absent provider key is allowed for the scaffold and local fake upstream.
+    """An absent provider key is allowed for unauthenticated local upstreams.
 
-    Provider authentication requirements will be enforced by the upstream client.
+    The configured upstream enforces its provider authentication requirements.
     Persistent-session opt-in collects a passphrase for authenticated lifespan startup.
     """
     value = os.environ.get(config.upstream.api_key_env)

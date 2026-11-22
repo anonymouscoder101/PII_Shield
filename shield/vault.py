@@ -2,7 +2,7 @@
 
 Explicit initialization/unlock derives keys. Mapping inserts encrypt original
 values before SQL binding; mapping reads authenticate ciphertext before returning
-values. Session lifetimes and API access are handled by later services.
+values. Session lifetimes and API access are handled by persistent/session services.
 Constructing a store does no I/O; only explicitly entering it opens the database.
 """
 
@@ -259,7 +259,7 @@ class VaultStore:
     """Explicit, synchronous, single-connection persistence boundary.
 
     Use one context on one thread. Transactions are short, non-nestable and must
-    contain no awaits or network work. Session coordination is a later layer.
+    contain no awaits or network work. PersistentSessions coordinates sessions.
     SQLite exceptions are internal: do not log them or expose them in API errors.
     """
 

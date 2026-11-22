@@ -54,6 +54,11 @@ class EntityType(StrEnum):
     CONTEXTUAL = "CONTEXTUAL"
 
 
+OPAQUE_ENTITY_TYPES = frozenset(
+    {EntityType.API_KEY, EntityType.SECRET, EntityType.EMPLOYEE_ID}
+)
+
+
 class DetectionStage(StrEnum):
     STAGE_1 = "stage1"
     STAGE_2 = "stage2"
@@ -93,7 +98,7 @@ class TokenMapping(Contract):
     ``original_value`` holds the first observed spelling of that identity. It is
     masked in representations/JSON; trusted restoration or encryption code must
     explicitly call ``original_value.get_secret_value()``. This is not a vault
-    row: persist only authenticated ciphertext in the later vault implementation.
+    row: the vault persists only authenticated ciphertext.
     """
 
     session_id: NonEmptyString

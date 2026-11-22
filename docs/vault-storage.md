@@ -158,7 +158,7 @@ random bytes and returns a masked `SecretBytes`. `ephemeral_session()` creates
 one request-local key, internal ID, and mapping dictionary. Its `finally` path
 clears mappings and drops its key reference on normal completion, exceptions,
 timeout or cancellation. Each valid chat request without `X-Shield-Session` uses
-this context, including the current blocked proxy scaffold. It creates no SQLite
+this context through detection, forwarding and restoration. It creates no SQLite
 files or reusable session headers. Supplied session IDs follow the locked-vault
 checks and do not silently create ephemeral replacements.
 
@@ -249,8 +249,10 @@ surrounding `use` scope exits, including restoration after the callback returns.
 A send failure does not roll back mappings already committed: an upstream may
 have received the sanitized request. Keys, pending values and the lease are
 released in `finally` on failure, timeout or cancellation. Committed rows survive
-for the session's normal TTL/deletion policy. The production gateway must use
-this send path when implemented; the current scaffold makes no provider calls.
+for the session's normal TTL/deletion policy. The production gateway uses
+`active.allocate(...)`, which commits each mapping before returning, then guards
+and sends the frozen payload after all allocations succeed. The batch send
+helper remains available for manually staged mappings.
 
 `active.read_mapping(token)` reads authenticated committed mappings without
 rechecking expiry mid-request. Standalone service mapping reads/writes reserve
